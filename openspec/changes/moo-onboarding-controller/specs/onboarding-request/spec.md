@@ -2,7 +2,7 @@
 
 ## Purpose
 
-State machine that drives a server from initial DHCP discovery through inventory lookup, Redfish probe, and BMC object creation. The `OnboardingRequest` CR is the durable record of all resolved inventory settings; metal-maintenance-operator reads these settings from it to create `BMCUser` and `BMCSettings` objects without re-querying inventory.
+State machine that drives a server from initial DHCP discovery through inventory lookup, Redfish probe, and BMC object creation. Sets `bootstrap=true` on the `BMC` CR as the sole handoff signal to metal-maintenance-operator; mmo operates independently from there using its own probe and `BMCBootstrapPolicy`.
 
 ## ADDED Requirements
 
@@ -28,30 +28,19 @@ The system SHALL reject an `OnboardingRequest` if the MAC address is not found i
 - **WHEN** the inventory provider indicates the server belongs to a different cluster
 - **THEN** the `OnboardingRequest` SHALL transition to `Skipped` phase and take no further action
 
-### Requirement: Redfish probe verifies BMC reachability
-The system SHALL perform an unauthenticated GET to `/redfish/v1` on the IP from the inventory lookup before creating BMC objects.
+### Requirement: Redfish probe verifies BMC reachability and extracts ManagerType
+The system SHALL perform an unauthenticated GET to `/redfish/v1` on the OOB IP from the inventory lookup before creating BMC objects, and SHALL extract the `ManagerType` from the response.
 
 #### Scenario: Successful Redfish probe
-- **WHEN** `/redfish/v1` returns HTTP 200 with a valid ManagerType field
-- **THEN** the system SHALL extract the ManagerType and proceed to BMC creation
+- **WHEN** `/redfish/v1` returns HTTP 200 with a valid `ManagerType` field
+- **THEN** the system SHALL record the `ManagerType` in `OnboardingRequest.status` and proceed to BMC creation
 
 #### Scenario: Unreachable BMC defers onboarding
 - **WHEN** the Redfish probe fails (connection refused, timeout, non-200 response)
 - **THEN** the system SHALL set phase to `RedfishProbe` with reason `Unreachable` and retry
 
-### Requirement: OnboardingRequest stores resolved inventory settings in spec
-After a successful inventory lookup the system SHALL write the resolved settings into `OnboardingRequest.spec.onboardingSettings`: the desired `BMCUser` fields (username, roleID) and the desired `BMCSettings` payload (hostname, NTP servers, AD/LDAP domain, syslog server).
-
-#### Scenario: Settings written before BMC creation
-- **WHEN** the inventory lookup phase succeeds
-- **THEN** `spec.onboardingSettings` SHALL be populated with all resolved fields before the reconciler advances to the `RedfishProbe` phase
-
-#### Scenario: Settings are immutable after being written
-- **WHEN** `spec.onboardingSettings` is already populated
-- **THEN** the reconciler SHALL NOT overwrite it on subsequent reconcile loops
-
 ### Requirement: BMC creation carries handoff annotations
-The system SHALL create a `BMC` CR with annotation `onboarding.metal.ironcore.dev/bootstrap=true` and `onboarding.metal.ironcore.dev/onboarding-request=<OnboardingRequest-name>` to allow metal-maintenance-operator to locate the `OnboardingRequest`.
+The system SHALL create a `BMC` CR with annotations `onboarding.metal.ironcore.dev/bootstrap=true` and `onboarding.metal.ironcore.dev/manager-type=<ManagerType>` to allow mmo to trigger its `BMCOnboardingReconciler` and select the correct `BMCBootstrapPolicy` candidates.
 
 #### Scenario: BMC CR created with annotations
 - **WHEN** inventory lookup and Redfish probe both succeed
@@ -62,8 +51,8 @@ The system SHALL create a `BMC` CR with annotation `onboarding.metal.ironcore.de
 - **THEN** the system SHALL NOT create a duplicate; it SHALL verify annotations are present and continue
 
 ### Requirement: OnboardingRequest carries full status
-The `OnboardingRequest` status SHALL expose the current phase, reason, and last-transition time.
+The `OnboardingRequest` status SHALL expose the current phase, reason, last-transition time, and discovered `ManagerType`.
 
 #### Scenario: Status reflects current phase
 - **WHEN** the reconciler advances or halts at any phase
-- **THEN** `status.phase`, `status.reason`, and `status.lastTransitionTime` SHALL be updated accordingly
+- **THEN** `status.phase`, `status.reason`, `status.lastTransitionTime`, and `status.managerType` SHALL be updated accordingly

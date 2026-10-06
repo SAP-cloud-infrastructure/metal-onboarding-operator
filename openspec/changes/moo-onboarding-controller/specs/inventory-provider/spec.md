@@ -2,16 +2,16 @@
 
 ## Purpose
 
-Pluggable interface for resolving a server MAC address to inventory data (hostname, cluster gate, OOB IP, NTP, AD/LDAP, syslog), with NetBox as the primary backend and a `ServerProfile` CRD as the fallback.
+Pluggable interface for resolving a server MAC address to the minimal inventory data moo needs: cluster membership gate and OOB static IP. mmo performs its own discovery via probe image and does not depend on this interface.
 
 ## ADDED Requirements
 
-### Requirement: InventoryProvider resolves MAC to server inventory
-The system SHALL expose an `InventoryProvider` interface that maps a MAC address to: cluster membership, hostname, OOB static IP, NTP server list, AD/LDAP domain, and syslog server.
+### Requirement: InventoryProvider resolves MAC to cluster gate and OOB IP
+The system SHALL expose an `InventoryProvider` interface that maps a MAC address to: cluster membership gate (belongs here / belongs elsewhere / unknown) and OOB static IP.
 
 #### Scenario: Successful MAC resolution
 - **WHEN** a MAC address is provided to an `InventoryProvider` implementation
-- **THEN** the provider SHALL return a populated inventory record or an unambiguous error
+- **THEN** the provider SHALL return a populated inventory record with cluster gate and OOB IP, or an unambiguous error
 
 #### Scenario: Server not in inventory
 - **WHEN** the MAC address has no matching record in the backend
@@ -22,7 +22,7 @@ The system SHALL include a NetBox implementation of `InventoryProvider` that loo
 
 #### Scenario: NetBox lookup by MAC
 - **WHEN** a MAC address is submitted to the NetBox provider
-- **THEN** the provider SHALL query NetBox for the device and return hostname, cluster, OOB IP, NTP, AD/LDAP domain, and syslog from NetBox fields
+- **THEN** the provider SHALL query NetBox for the device and return cluster membership and OOB IP
 
 #### Scenario: NetBox unreachable returns transient error
 - **WHEN** the NetBox API is unreachable or returns a 5xx error
@@ -33,21 +33,21 @@ The system SHALL support a `ServerProfile` CRD (group `onboarding.metal.ironcore
 
 #### Scenario: ServerProfile matched by MAC address
 - **WHEN** a `ServerProfile` CR exists whose `spec.macAddress` matches the queried MAC
-- **THEN** the CRD provider SHALL return that profile's inventory fields
+- **THEN** the CRD provider SHALL return that profile's cluster gate and OOB IP
 
 #### Scenario: No matching ServerProfile
 - **WHEN** no `ServerProfile` CR matches the MAC address
 - **THEN** the CRD provider SHALL return `ErrNotFound`
 
 ### Requirement: SiteConfig provides cluster-wide defaults
-The system SHALL support a `SiteConfig` CR (group `onboarding.metal.ironcore.dev`) that provides NTP, syslog, and AD/LDAP defaults referenced by `ServerProfile` when those fields are not set per-server.
+The system SHALL support a `SiteConfig` CR (group `onboarding.metal.ironcore.dev`) that provides cluster identity defaults referenced by `ServerProfile` when those fields are not set per-server.
 
-#### Scenario: ServerProfile inherits from SiteConfig
-- **WHEN** a `ServerProfile` omits NTP, syslog, or AD/LDAP fields and references a `SiteConfig`
-- **THEN** the provider SHALL return the values from the referenced `SiteConfig`
+#### Scenario: ServerProfile inherits cluster gate from SiteConfig
+- **WHEN** a `ServerProfile` omits the cluster identity field and references a `SiteConfig`
+- **THEN** the provider SHALL return the cluster identity value from the referenced `SiteConfig`
 
 ### Requirement: Provider selection is operator configuration
-The operator SHALL be configured at startup to select which `InventoryProvider` implementation to use (NetBox, CRD, or CRD-with-NetBox-fallback).
+The operator SHALL be configured at startup to select which `InventoryProvider` implementation to use (NetBox or CRD).
 
 #### Scenario: Configuration selects NetBox provider
 - **WHEN** the operator is started with `inventoryProvider: netbox`

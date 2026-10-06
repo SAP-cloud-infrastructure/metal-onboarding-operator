@@ -11,11 +11,12 @@ moo is a greenfield kubebuilder operator. The only existing comparable code is i
 **Goals:**
 - Event-driven server onboarding triggered by metaldhcp `DHCPLease` CRs.
 - Pluggable inventory via `InventoryProvider` interface; NetBox primary, `ServerProfile` CRD fallback.
-- Produces `BMC`/`BMCSecret`/`ServerWiring` objects annotated for metal-maintenance-operator.
-- `OnboardingRequest.spec.onboardingSettings` is the durable record of all resolved inventory data; mmo reads it directly without re-querying inventory.
+- Produces `BMC`/`BMCSecret`/`ServerWiring` objects with `bootstrap=true` annotation for mmo.
+- moo and mmo are fully independent: the only shared surface is metal-operator's `BMC` CR.
 
 **Non-Goals:**
-- Day-0 BMC/BIOS configuration (owned by metal-maintenance-operator / mmo).
+- Any authenticated BMC operation (owned by mmo).
+- Day-0 BMC/BIOS configuration (owned by mmo).
 - DHCP serving or `DHCPLease` type ownership (owned by metaldhcp).
 - Ongoing lifecycle configuration (NTP drift correction, AD sync — tracked in issue #1883).
 - DNS reservation and vendor console registration (phase 2, issue #912).
@@ -50,13 +51,15 @@ type InventoryProvider interface {
 }
 ```
 
+`InventoryRecord` contains only what moo needs: cluster gate and OOB IP. mmo performs its own discovery via probe image and does not consume this record.
+
 Implementations: `NetBoxProvider` (HTTP client to NetBox REST API) and `CRDProvider` (reads `ServerProfile` + `SiteConfig` CRs). Selected by operator flag `--inventory-provider=netbox|crd`.
 
 **Alternative considered**: Runtime dynamic selection per `OnboardingRequest`. Rejected: adds complexity for a configuration that is per-cluster, not per-server.
 
 ### D5: ServerProfile + SiteConfig CRDs in group `onboarding.metal.ironcore.dev`
 
-These are `onboarding.metal.ironcore.dev/v1alpha1` types, defined in moo's own `api/v1alpha1/`. They are not shared with metaldhcp.
+These are `onboarding.metal.ironcore.dev/v1alpha1` types, defined in moo's own `api/v1alpha1/`. They are not shared with metaldhcp or mmo.
 
 `SiteConfig` is cluster-scoped; `ServerProfile` is namespace-scoped (same namespace as the operator). `ServerProfile` references a `SiteConfig` by name for defaults.
 
@@ -66,29 +69,66 @@ The reconciler uses `controller-runtime`'s `CreateOrUpdate` for `BMC`, `BMCSecre
 
 **Rationale**: Operator restarts or network partitions during reconcile must not leave partial state or fail on re-entry.
 
-### D7: Factory credentials are not stored in moo
+### D7: moo→mmo handoff is two annotations on the BMC CR
 
-moo creates the `BMC` CR with `spec.bmcSecretRef` pointing to a `BMCSecret` generated with a placeholder/bootstrap credential. Actual credential rotation is owned by metal-maintenance-operator's `BMCUserReconciler`. moo is not involved in credential lifecycle.
+moo sets exactly two annotations on the `BMC` CR it creates:
+- `onboarding.metal.ironcore.dev/bootstrap=true` — triggers mmo's `BMCOnboardingReconciler`
+- `onboarding.metal.ironcore.dev/manager-type=<ManagerType>` — vendor identity from the unauthenticated Redfish probe; used by mmo to select matching `BMCBootstrapPolicy` candidates
 
-### D8: OnboardingRequest.spec.onboardingSettings is the moo→mmo handoff record
+mmo needs nothing else from moo. It does not import moo's types, does not read `OnboardingRequest`, and performs its own discovery via probe image once it has authenticated access.
 
-After inventory lookup succeeds, moo writes all resolved settings into `spec.onboardingSettings` on the `OnboardingRequest`:
-- `bmcUser`: desired username and roleID for the `BMCUser` CR mmo will create
-- `bmcSettings`: hostname, NTP servers, AD/LDAP domain, syslog server for the `BMCSettings` CR mmo will create
+**Alternative considered**: Pass resolved inventory settings (hostname, NTP, AD/LDAP, syslog) via annotations or `OnboardingRequest.spec`. Rejected: mmo has its own probe image for discovery and must not depend on moo's inventory lookup result. Passing structured data through untyped annotations is also fragile.
 
-This field is written once and treated as immutable; mmo reads it without re-querying NetBox or `ServerProfile`.
+### D8: mmo independence — BMCOnboardingReconciler and BMCBootstrapPolicy
 
-**Alternative considered**: Store settings as annotations on the `BMC` CR. Rejected: annotations are untyped strings with no schema validation, and the `BMC` CR is owned by metal-operator — adding arbitrary payload there is invasive.
+This decision belongs to mmo's design, but is documented here to make the boundary explicit.
 
-**Alternative considered**: mmo re-queries NetBox independently. Rejected: creates a second NetBox dependency in mmo, duplicates the inventory lookup, and introduces a TOCTOU window if NetBox data changes between moo and mmo runs.
+mmo's new `BMCOnboardingReconciler` watches `BMC` CRs with `bootstrap=true`. It orchestrates the full authenticated pipeline in order:
 
-### D9: mmo locates OnboardingRequest via annotation on BMC
+```
+1. Credential bootstrap (BMCBootstrapPolicy → BMCUser)
+2. Probe-image-driven discovery
+3. BMCSettings (hostname, NTP, syslog, AD/LDAP via Redfish)
+4. BIOSSettings (boot order, TPM)
+5. Clear bootstrap=true → Server taint lifted → Available
+```
 
-moo sets annotation `onboarding.metal.ironcore.dev/onboarding-request=<name>` on the `BMC` CR alongside `onboarding.metal.ironcore.dev/bootstrap=true`. mmo's bootstrap controller reads this annotation to fetch the `OnboardingRequest` and its `spec.onboardingSettings`.
+Each step depends on the previous completing successfully. `BMCOnboardingReconciler` is the orchestrator; it creates child CRs (`BMCUser`, `BMCSettings`, `BIOSSettings`) and waits for each to reach its terminal state before proceeding.
 
-**Alternative considered**: Owner reference from `BMC` → `OnboardingRequest`. Rejected: owner references require same-namespace objects; if `BMC` is cluster-scoped and `OnboardingRequest` is namespace-scoped, the reference is invalid.
+**BMCBootstrapPolicy** (cluster-scoped CR in mmo) defines the ordered list of credentials to try against an unmanaged BMC:
 
-**Alternative considered**: mmo field-indexes `OnboardingRequest` by `spec.bmcRef.name`. Rejected: requires mmo to import moo's API types and maintain an index; the annotation approach is a simpler, explicit pointer.
+```yaml
+apiVersion: baseboard.metal.ironcore.dev/v1alpha1
+kind: BMCBootstrapPolicy
+metadata:
+  name: default
+spec:
+  candidates:
+    - name: provisioning-user       # fleet-wide pre-created user (SAP build-up team)
+      username: sap-provision
+      secretRef: { name: bmc-provisioning-secret }
+      postBootstrap: delete
+    - name: dell-idrac-default      # vendor default, tried if managerType matches
+      managerType: iDRAC
+      username: root
+      secretRef: { name: bmc-dell-default }
+      postBootstrap: deactivate
+    - name: hpe-ilo-default
+      managerType: iLO
+      username: Administrator
+      secretRef: { name: bmc-hpe-default }
+      postBootstrap: deactivate
+```
+
+`managerType` on each candidate is matched against the `manager-type` annotation on the `BMC` CR. Unfiltered candidates (no `managerType`) are always tried. Candidates are tried in order; the first to authenticate successfully is used to create the managed `BMCUser`.
+
+`postBootstrap` policy per candidate:
+- `delete` — remove the factory/provisioning account after managed user is created (for purpose-built provisioning users)
+- `deactivate` — disable the account (for vendor defaults where deletion may fail on some firmware)
+
+mmo ships built-in vendor defaults so open-source users without a provisioning user get working bootstrap out of the box. A cluster-provided `BMCBootstrapPolicy` named `default` overrides the built-ins.
+
+**BMC reset recovery**: a BMC reset re-enables the factory/deactivated user. mmo detects loss of managed `BMCUser` via Redfish and re-runs the bootstrap flow using `BMCBootstrapPolicy`. The deactivate-not-delete policy for vendor defaults is what makes this re-entry possible.
 
 ## Risks / Trade-offs
 
@@ -96,6 +136,7 @@ moo sets annotation `onboarding.metal.ironcore.dev/onboarding-request=<name>` on
 - **NetBox API stability** → NetBox schema changes can break the provider. Mitigation: isolate all NetBox HTTP calls in `internal/provider/netbox/` behind the `InventoryProvider` interface so the surface area is bounded.
 - **Race between lease and server power-on** → A DHCPLease may arrive before the server's BMC is reachable at the probed IP. Mitigation: Redfish probe retries with backoff; `OnboardingRequest` stays in `RedfishProbe` phase until BMC responds.
 - **Single operator replica** → controller-runtime leader election is required; without it a replica restart causes double-reconcile. Mitigation: standard leader-election flag in operator flags, enabled by default in production Helm chart.
+- **BMC reset does not trigger new DHCPLease** → A BMC firmware reset keeps the existing IP; no new `DHCPLease` CR is produced. moo is not re-triggered. Mitigation: mmo's `BMCOnboardingReconciler` owns reset detection and re-bootstrap independently of moo.
 
 ## Migration Plan
 
@@ -103,7 +144,7 @@ moo sets annotation `onboarding.metal.ironcore.dev/onboarding-request=<name>` on
 2. Apply moo CRDs (`OnboardingRequest`, `ServerProfile`, `SiteConfig`).
 3. Deploy moo operator with `--inventory-provider` configured for the cluster.
 4. Decommission argora once moo has produced `BMC`/`BMCSecret`/`ServerWiring` for all active servers; verify no argora reconcile loops remain.
-5. AWX decommission is a separate milestone, gated on mmo completing day-0 configuration.
+5. AWX decommission is a separate milestone, gated on mmo completing day-0 configuration via `BMCOnboardingReconciler`.
 
 **Rollback**: moo creates no objects that argora cannot recreate; rollback is stop-moo + restart-argora.
 
