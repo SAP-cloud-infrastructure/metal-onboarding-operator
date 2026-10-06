@@ -53,6 +53,9 @@ type OnboardingRequestReconciler struct {
 	// MaxInventoryRetries is the number of times to retry inventory lookup before failing.
 	// Zero means infinite retries.
 	MaxInventoryRetries int
+	// RedfishBaseURL overrides the Redfish endpoint base URL, used in tests.
+	// When empty, the controller uses http://<oobIP> as the base URL.
+	RedfishBaseURL string
 }
 
 // +kubebuilder:rbac:groups=onboarding.metal.ironcore.dev,resources=onboardingrequests,verbs=get;list;watch;create;update;patch;delete
@@ -145,7 +148,7 @@ func (r *OnboardingRequestReconciler) redfishProbePhase(ctx context.Context, or 
 		return r.setPhase(ctx, or, onboardingv1alpha1.PhaseInventoryLookup, "OOBIPMissing")
 	}
 
-	managerType, err := probeRedfish(ctx, or.Status.OOBIP)
+	managerType, err := probeRedfish(ctx, r.redfishURL(or.Status.OOBIP))
 	if err != nil {
 		// Transient — BMC may not be reachable yet.
 		_ = r.patchReason(ctx, or, "Unreachable")
@@ -304,9 +307,18 @@ func inventoryRetryCount(or *onboardingv1alpha1.OnboardingRequest) int {
 	return 0
 }
 
+// redfishURL returns the full base URL for the Redfish API on the given OOB IP.
+// When RedfishBaseURL is set (for tests), it is used directly.
+func (r *OnboardingRequestReconciler) redfishURL(oobIP string) string {
+	if r.RedfishBaseURL != "" {
+		return r.RedfishBaseURL
+	}
+	return fmt.Sprintf("http://%s", oobIP)
+}
+
 // probeRedfish performs an unauthenticated GET /redfish/v1 and extracts the ManagerType.
-func probeRedfish(ctx context.Context, oobIP string) (string, error) {
-	url := fmt.Sprintf("http://%s/redfish/v1", oobIP)
+func probeRedfish(ctx context.Context, baseURL string) (string, error) {
+	url := baseURL + "/redfish/v1"
 	reqCtx, cancel := context.WithTimeout(ctx, redfishProbeTimeout)
 	defer cancel()
 

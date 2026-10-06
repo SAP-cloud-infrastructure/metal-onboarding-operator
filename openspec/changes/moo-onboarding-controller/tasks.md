@@ -23,7 +23,7 @@
 ## 4. NetBox Provider Implementation
 
 - [ ] 4.1 Implement `NetBoxProvider.LookupByMAC` using the NetBox REST API; look up MAC → interface → device → cluster; return `ServerName` (device.Name), `OOBIP` (device.OOBIp.Address), `BMCHostname` (remoteboard interface DNS name, optional), `Labels` (10 topology labels: region, site.Slug, cluster.Name, cluster.Type.Slug, device.Name, bb-suffix, device.DeviceType.Slug, DeviceRole.Slug, Platform.Slug), and `ClusterGate`; verify unit tests with an httptest server cover: found device, device-not-found → `ErrNotFound`, 5xx → retriable error, wrong-cluster → `ClusterGate: elsewhere`
-- [ ] 4.2 Add operator flags `--netbox-url` and `--netbox-token-file`; wire into main.go and verify the operator starts with `--inventory-provider=netbox` and the flags populated
+- [x] 4.2 Add operator flags `--netbox-url` and `--netbox-token-file`; wire into main.go and verify the operator starts with `--inventory-provider=netbox` and the flags populated
 
 ## 5. DHCPLease Watcher
 
@@ -36,7 +36,7 @@
 - [x] 6.2 Implement `inventoryLookupPhase`: call `InventoryProvider.LookupByMAC`; on `ErrNotFound` after `--inventory-max-retries` → set phase `Failed/InventoryNotFound`; on `ClusterGate: elsewhere` → set phase `Skipped`; on success → store OOB IP in `status` and advance to `RedfishProbe`; verify unit tests cover all three outcomes
 - [x] 6.3 Implement `redfishProbePhase`: unauthenticated GET `http://<oobIP>/redfish/v1`; on 200 + valid `ManagerType` → store `ManagerType` in `status.managerType` and advance to `BMCCreation`; on error → set phase `RedfishProbe/Unreachable` and requeue with backoff; verify unit tests with httptest cover: 200 success, connection refused, non-200
 - [x] 6.4 Implement `bmcCreationPhase`: `CreateOrUpdate` `BMC` CR using `ServerName` from inventory as the object name, `OOBIP` as `spec.endpoint.ip`, protocol Redfish/443, `BMCHostname` as `spec.hostname` (when set), inventory `Labels` in `metadata.labels`, annotations `onboarding.metal.ironcore.dev/bootstrap=true` and `onboarding.metal.ironcore.dev/manager-type=<ManagerType>`; `CreateOrUpdate` `BMCSecret` (bootstrap credential placeholder); `CreateOrUpdate` `ServerWiring`; on success → set phase `Done`; verify unit tests with envtest cover: idempotent re-entry, both annotations present after creation, labels applied
-- [ ] 6.5 Write integration test using envtest: create `OnboardingRequest` with a mock `InventoryProvider` and httptest Redfish server; assert full phase progression to `Done`, `status.managerType` populated, and `BMC` CR has both handoff annotations
+- [x] 6.5 Write integration test using envtest: create `OnboardingRequest` with a mock `InventoryProvider` and httptest Redfish server; assert full phase progression to `Done`, `status.managerType` populated, and `BMC` CR has both handoff annotations
 
 ## 7. Operator Wiring and Configuration
 
