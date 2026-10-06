@@ -1,0 +1,9 @@
+apiVersion: onboarding.metal.ironcore.dev/v1alpha1
+kind: OnboardingRequest
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-onboarding-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: onboardingrequest-sample
+spec:
+  # TODO(user): Add fields here

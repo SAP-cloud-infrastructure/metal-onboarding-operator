@@ -2,23 +2,23 @@
 
 ## 1. Project Scaffold
 
-- [ ] 1.1 Run `kubebuilder init --domain metal.ironcore.dev --repo github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator` and verify `go.mod`, `Makefile`, `PROJECT` file are created
-- [ ] 1.2 Verify the generated `PROJECT` file has `domain: metal.ironcore.dev`, `repo: github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator`, and `layout: go.kubebuilder.io/v4`; confirm single-group layout (no `--multigroup` needed — moo uses one group `onboarding` under domain `metal.ironcore.dev`, matching the single-group pattern of metal-operator)
-- [ ] 1.3 Add `github.com/ironcore-dev/metal-operator/api` as a Go module dependency (for `BMC`, `BMCSecret`, `ServerWiring` types) and verify `go mod tidy` succeeds
-- [ ] 1.4 Add a metaldhcp module stub (local replace directive or shim interface `DHCPLeaseReader`) in `internal/dhcp/lease.go` to unblock compilation before metaldhcp publishes a Go module; verify `go build ./...` succeeds
+- [x] 1.1 Run `kubebuilder init --domain metal.ironcore.dev --repo github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator` and verify `go.mod`, `Makefile`, `PROJECT` file are created
+- [x] 1.2 Verify the generated `PROJECT` file has `domain: metal.ironcore.dev`, `repo: github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator`, and `layout: go.kubebuilder.io/v4`; confirm single-group layout (no `--multigroup` needed — moo uses one group `onboarding` under domain `metal.ironcore.dev`, matching the single-group pattern of metal-operator)
+- [x] 1.3 Add `github.com/ironcore-dev/metal-operator/api` as a Go module dependency (for `BMC`, `BMCSecret`, `ServerWiring` types) and verify `go mod tidy` succeeds
+- [x] 1.4 Add a metaldhcp module stub (local replace directive or shim interface `DHCPLeaseReader`) in `internal/dhcp/lease.go` to unblock compilation before metaldhcp publishes a Go module; verify `go build ./...` succeeds
 
 ## 2. API Types — onboarding.metal.ironcore.dev
 
-- [ ] 2.1 Scaffold `OnboardingRequest` CRD: `kubebuilder create api --group onboarding --version v1alpha1 --kind OnboardingRequest` with fields: `spec.macAddress`, `spec.assignedIP`, `spec.dhcpLeaseRef`; `status.phase` (enum: InventoryLookup, RedfishProbe, BMCCreation, Done, Failed, Skipped), `status.reason`, `status.lastTransitionTime`, `status.managerType`, `status.conditions`; verify `make generate manifests` produces CRD YAML with all fields
-- [ ] 2.2 Scaffold `ServerProfile` CRD: `kubebuilder create api --group onboarding --version v1alpha1 --kind ServerProfile` with fields: `spec.macAddress`, `spec.serverName`, `spec.oobIP`, `spec.bmcHostname` (optional), `spec.clusterName`, `spec.siteConfigRef`, `spec.labels` (map[string]string, optional topology overrides); verify generated CRD YAML
-- [ ] 2.3 Scaffold `SiteConfig` CRD (cluster-scoped): `kubebuilder create api --group onboarding --version v1alpha1 --kind SiteConfig --namespaced=false` with fields: `spec.clusterName`; verify generated CRD YAML
-- [ ] 2.4 Write unit tests for type validation (required fields, MAC address format marker) and verify `make test` passes for the types package
+- [x] 2.1 Scaffold `OnboardingRequest` CRD: `kubebuilder create api --group onboarding --version v1alpha1 --kind OnboardingRequest` with fields: `spec.macAddress`, `spec.assignedIP`, `spec.dhcpLeaseRef`; `status.phase` (enum: InventoryLookup, RedfishProbe, BMCCreation, Done, Failed, Skipped), `status.reason`, `status.lastTransitionTime`, `status.managerType`, `status.conditions`; verify `make generate manifests` produces CRD YAML with all fields
+- [x] 2.2 Scaffold `ServerProfile` CRD: `kubebuilder create api --group onboarding --version v1alpha1 --kind ServerProfile` with fields: `spec.macAddress`, `spec.serverName`, `spec.oobIP`, `spec.bmcHostname` (optional), `spec.clusterName`, `spec.siteConfigRef`, `spec.labels` (map[string]string, optional topology overrides); verify generated CRD YAML
+- [x] 2.3 Scaffold `SiteConfig` CRD (cluster-scoped): `kubebuilder create api --group onboarding --version v1alpha1 --kind SiteConfig --namespaced=false` with fields: `spec.clusterName`; verify generated CRD YAML
+- [x] 2.4 Write unit tests for type validation (required fields, MAC address format marker) and verify `make test` passes for the types package
 
 ## 3. InventoryProvider Interface and CRD Backend
 
-- [ ] 3.1 Define `InventoryProvider` interface in `internal/provider/provider.go` with `LookupByMAC(ctx, mac) (*InventoryRecord, error)` where `InventoryRecord` contains: `ClusterGate` (belongs/elsewhere/unknown), `ServerName` (used as BMC object name), `OOBIP`, `BMCHostname` (optional), `Labels map[string]string` (topology+cluster labels applied to BMC metadata); define sentinel `ErrNotFound`; verify it compiles
-- [ ] 3.2 Implement `CRDProvider` in `internal/provider/crd/provider.go` that reads `ServerProfile` CRs by MAC address and returns `ServerName`, `OOBIP`, `ClusterGate`, and any `Labels` declared in the `ServerProfile`; merges cluster identity defaults from referenced `SiteConfig`; verify unit tests cover: MAC match, no match → `ErrNotFound`, SiteConfig default inheritance
-- [ ] 3.3 Implement `NetBoxProvider` stub in `internal/provider/netbox/provider.go` (returns `ErrNotFound` for all MACs) with a `TODO` comment marking the real HTTP implementation; verify it satisfies the interface and `make test` passes
+- [x] 3.1 Define `InventoryProvider` interface in `internal/provider/provider.go` with `LookupByMAC(ctx, mac) (*InventoryRecord, error)` where `InventoryRecord` contains: `ClusterGate` (belongs/elsewhere/unknown), `ServerName` (used as BMC object name), `OOBIP`, `BMCHostname` (optional), `Labels map[string]string` (topology+cluster labels applied to BMC metadata); define sentinel `ErrNotFound`; verify it compiles
+- [x] 3.2 Implement `CRDProvider` in `internal/provider/crd/provider.go` that reads `ServerProfile` CRs by MAC address and returns `ServerName`, `OOBIP`, `ClusterGate`, and any `Labels` declared in the `ServerProfile`; merges cluster identity defaults from referenced `SiteConfig`; verify unit tests cover: MAC match, no match → `ErrNotFound`, SiteConfig default inheritance
+- [x] 3.3 Implement `NetBoxProvider` stub in `internal/provider/netbox/provider.go` (returns `ErrNotFound` for all MACs) with a `TODO` comment marking the real HTTP implementation; verify it satisfies the interface and `make test` passes
 
 ## 4. NetBox Provider Implementation
 

@@ -1,0 +1,6 @@
+## Append samples of your project ##
+resources:
+- onboarding_v1alpha1_onboardingrequest.yaml
+- onboarding_v1alpha1_serverprofile.yaml
+- onboarding_v1alpha1_siteconfig.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

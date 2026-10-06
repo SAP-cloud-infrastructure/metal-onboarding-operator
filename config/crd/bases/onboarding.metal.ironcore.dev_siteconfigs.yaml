@@ -1,0 +1,73 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: siteconfigs.onboarding.metal.ironcore.dev
+spec:
+  group: onboarding.metal.ironcore.dev
+  names:
+    kind: SiteConfig
+    listKind: SiteConfigList
+    plural: siteconfigs
+    singular: siteconfig
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.clusterName
+      name: ClusterName
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          SiteConfig is the Schema for the siteconfigs API.
+          It is cluster-scoped and provides per-cluster defaults for the CRD inventory provider.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              SiteConfigSpec defines the desired state of SiteConfig.
+              SiteConfig provides cluster/site-level defaults referenced by ServerProfile entries.
+            properties:
+              clusterName:
+                description: |-
+                  clusterName is the name of the Kubernetes cluster this site config applies to.
+                  Used by CRDProvider to gate onboarding: servers not matching this cluster are Skipped.
+                type: string
+              defaultLabels:
+                additionalProperties:
+                  type: string
+                description: |-
+                  defaultLabels are topology labels applied to all BMC objects for servers in this site.
+                  ServerProfile.spec.labels take precedence over these defaults.
+                type: object
+            required:
+            - clusterName
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}
