@@ -3,6 +3,7 @@ module github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator
 go 1.26.3
 
 require (
+	github.com/ironcore-dev/metal-operator v0.8.0
 	github.com/onsi/ginkgo/v2 v2.32.2
 	github.com/onsi/gomega v1.43.0
 	k8s.io/api v0.36.3
@@ -61,6 +62,7 @@ require (
 	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/stmcginnis/gofish v0.25.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.65.0 // indirect

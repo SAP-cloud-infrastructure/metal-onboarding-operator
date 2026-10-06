@@ -5,6 +5,26 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - dhcp.metal.ironcore.dev
+  resources:
+  - dhcpleases
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - bmcs
+  - bmcsecrets
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - onboarding.metal.ironcore.dev
   resources:
   - onboardingrequests
@@ -30,3 +50,23 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - onboarding.metal.ironcore.dev
+  resources:
+  - serverprofiles
+  - siteconfigs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - readiness.metal.ironcore.dev
+  resources:
+  - serverwirings
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch

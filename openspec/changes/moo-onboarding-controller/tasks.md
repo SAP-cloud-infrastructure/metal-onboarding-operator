@@ -27,22 +27,22 @@
 
 ## 5. DHCPLease Watcher
 
-- [ ] 5.1 Scaffold `DHCPLeaseController` in `internal/controller/dhcplease_controller.go` that watches `dhcp.metal.ironcore.dev/v1alpha1 DHCPLease` (or the shim from 1.4) and creates one `OnboardingRequest` per unique MAC address using `CreateOrUpdate`; verify unit tests cover: new lease → OnboardingRequest created, second lease same MAC → no duplicate, lease deletion → OnboardingRequest survives
-- [ ] 5.2 Wire `DHCPLeaseController` into `cmd/manager/main.go` with configurable `--dhcp-lease-namespace` flag; verify operator starts and watches the configured namespace
+- [x] 5.1 Scaffold `DHCPLeaseController` in `internal/controller/dhcplease_controller.go` that watches `dhcp.metal.ironcore.dev/v1alpha1 DHCPLease` (or the shim from 1.4) and creates one `OnboardingRequest` per unique MAC address using `CreateOrUpdate`; verify unit tests cover: new lease → OnboardingRequest created, second lease same MAC → no duplicate, lease deletion → OnboardingRequest survives
+- [x] 5.2 Wire `DHCPLeaseController` into `cmd/manager/main.go` with configurable `--dhcp-lease-namespace` flag; verify operator starts and watches the configured namespace
 
 ## 6. OnboardingRequest Reconciler
 
-- [ ] 6.1 Scaffold `OnboardingRequestReconciler` in `internal/controller/onboardingrequest_controller.go`; implement phase dispatcher that reads `status.phase` and calls the matching handler; verify it compiles and `make test` passes with a no-op reconciler
-- [ ] 6.2 Implement `inventoryLookupPhase`: call `InventoryProvider.LookupByMAC`; on `ErrNotFound` after `--inventory-max-retries` → set phase `Failed/InventoryNotFound`; on `ClusterGate: elsewhere` → set phase `Skipped`; on success → store OOB IP in `status` and advance to `RedfishProbe`; verify unit tests cover all three outcomes
-- [ ] 6.3 Implement `redfishProbePhase`: unauthenticated GET `http://<oobIP>/redfish/v1`; on 200 + valid `ManagerType` → store `ManagerType` in `status.managerType` and advance to `BMCCreation`; on error → set phase `RedfishProbe/Unreachable` and requeue with backoff; verify unit tests with httptest cover: 200 success, connection refused, non-200
-- [ ] 6.4 Implement `bmcCreationPhase`: `CreateOrUpdate` `BMC` CR using `ServerName` from inventory as the object name, `OOBIP` as `spec.endpoint.ip`, protocol Redfish/443, `BMCHostname` as `spec.hostname` (when set), inventory `Labels` in `metadata.labels`, annotations `onboarding.metal.ironcore.dev/bootstrap=true` and `onboarding.metal.ironcore.dev/manager-type=<ManagerType>`; `CreateOrUpdate` `BMCSecret` (bootstrap credential placeholder); `CreateOrUpdate` `ServerWiring`; on success → set phase `Done`; verify unit tests with envtest cover: idempotent re-entry, both annotations present after creation, labels applied
+- [x] 6.1 Scaffold `OnboardingRequestReconciler` in `internal/controller/onboardingrequest_controller.go`; implement phase dispatcher that reads `status.phase` and calls the matching handler; verify it compiles and `make test` passes with a no-op reconciler
+- [x] 6.2 Implement `inventoryLookupPhase`: call `InventoryProvider.LookupByMAC`; on `ErrNotFound` after `--inventory-max-retries` → set phase `Failed/InventoryNotFound`; on `ClusterGate: elsewhere` → set phase `Skipped`; on success → store OOB IP in `status` and advance to `RedfishProbe`; verify unit tests cover all three outcomes
+- [x] 6.3 Implement `redfishProbePhase`: unauthenticated GET `http://<oobIP>/redfish/v1`; on 200 + valid `ManagerType` → store `ManagerType` in `status.managerType` and advance to `BMCCreation`; on error → set phase `RedfishProbe/Unreachable` and requeue with backoff; verify unit tests with httptest cover: 200 success, connection refused, non-200
+- [x] 6.4 Implement `bmcCreationPhase`: `CreateOrUpdate` `BMC` CR using `ServerName` from inventory as the object name, `OOBIP` as `spec.endpoint.ip`, protocol Redfish/443, `BMCHostname` as `spec.hostname` (when set), inventory `Labels` in `metadata.labels`, annotations `onboarding.metal.ironcore.dev/bootstrap=true` and `onboarding.metal.ironcore.dev/manager-type=<ManagerType>`; `CreateOrUpdate` `BMCSecret` (bootstrap credential placeholder); `CreateOrUpdate` `ServerWiring`; on success → set phase `Done`; verify unit tests with envtest cover: idempotent re-entry, both annotations present after creation, labels applied
 - [ ] 6.5 Write integration test using envtest: create `OnboardingRequest` with a mock `InventoryProvider` and httptest Redfish server; assert full phase progression to `Done`, `status.managerType` populated, and `BMC` CR has both handoff annotations
 
 ## 7. Operator Wiring and Configuration
 
-- [ ] 7.1 Wire `OnboardingRequestReconciler` into `cmd/manager/main.go` with `--inventory-provider` flag (values: `netbox`, `crd`); verify operator starts without panicking
-- [ ] 7.2 Add RBAC markers for all required permissions: watch `DHCPLease`, create/update `OnboardingRequest`, read `ServerProfile`/`SiteConfig`, create/update `BMC`/`BMCSecret`/`ServerWiring`; verify `make manifests` generates a `ClusterRole` covering all verbs
-- [ ] 7.3 Add leader-election flag (enabled by default); verify `--leader-elect=false` runs in local/dev mode without needing a lease
+- [x] 7.1 Wire `OnboardingRequestReconciler` into `cmd/manager/main.go` with `--inventory-provider` flag (values: `netbox`, `crd`); verify operator starts without panicking
+- [x] 7.2 Add RBAC markers for all required permissions: watch `DHCPLease`, create/update `OnboardingRequest`, read `ServerProfile`/`SiteConfig`, create/update `BMC`/`BMCSecret`/`ServerWiring`; verify `make manifests` generates a `ClusterRole` covering all verbs
+- [x] 7.3 Add leader-election flag (enabled by default); verify `--leader-elect=false` runs in local/dev mode without needing a lease
 
 ## 8. Helm Chart and Deployment
 
