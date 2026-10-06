@@ -6,12 +6,14 @@ Pluggable interface for resolving a server MAC address to the minimal inventory 
 
 ## ADDED Requirements
 
-### Requirement: InventoryProvider resolves MAC to cluster gate and OOB IP
-The system SHALL expose an `InventoryProvider` interface that maps a MAC address to: cluster membership gate (belongs here / belongs elsewhere / unknown) and OOB static IP.
+### Requirement: InventoryProvider resolves MAC to cluster gate, OOB IP, server name, labels, and optional hostname
+The system SHALL expose an `InventoryProvider` interface that maps a MAC address to: cluster membership gate (belongs here / belongs elsewhere / unknown), OOB static IP, server name (used as the `BMC` object name), topology labels (applied to the `BMC` object), and an optional BMC hostname (DNS name for the remoteboard interface).
+
+These fields mirror what argora reads from NetBox: `device.Name`, `device.OOBIp.Address`, the remoteboard DNS name from IPAM, and the 10 topology labels derived from `region`, `site.Slug`, `cluster.Name`, `cluster.Type.Slug`, `device.Name`, and `device.DeviceType.Slug`/`DeviceRole.Slug`/`Platform.Slug`.
 
 #### Scenario: Successful MAC resolution
 - **WHEN** a MAC address is provided to an `InventoryProvider` implementation
-- **THEN** the provider SHALL return a populated inventory record with cluster gate and OOB IP, or an unambiguous error
+- **THEN** the provider SHALL return a populated inventory record with cluster gate, OOB IP, server name, labels, and optional hostname, or an unambiguous error
 
 #### Scenario: Server not in inventory
 - **WHEN** the MAC address has no matching record in the backend
