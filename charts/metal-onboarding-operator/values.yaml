@@ -1,0 +1,34 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/sap-cloud-infrastructure/metal-onboarding-operator
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Namespace to watch for DHCPLease CRs (defaults to the operator's own namespace when empty)
+dhcpLeaseNamespace: ""
+
+# NetBox settings — required
+netbox:
+  url: ""
+  tokenSecret:
+    name: ""
+    key: token
+
+# Name of this cluster, used by the NetBox provider to gate ClusterGate decisions
+clusterName: ""
+
+# Leader election (disable for local dev)
+leaderElect: true
+
+serviceAccount:
+  create: true
+  name: ""
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

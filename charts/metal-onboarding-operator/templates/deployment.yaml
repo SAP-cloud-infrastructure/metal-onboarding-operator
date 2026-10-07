@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "metal-onboarding-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "metal-onboarding-operator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "metal-onboarding-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "metal-onboarding-operator.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "metal-onboarding-operator.serviceAccountName" . }}
+      containers:
+      - name: manager
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+        - --netbox-url={{ required "netbox.url is required" .Values.netbox.url }}
+        - --netbox-token-file=/var/run/secrets/netbox/{{ .Values.netbox.tokenSecret.key }}
+        {{- if .Values.dhcpLeaseNamespace }}
+        - --dhcp-lease-namespace={{ .Values.dhcpLeaseNamespace }}
+        {{- end }}
+        {{- if .Values.clusterName }}
+        - --cluster-name={{ .Values.clusterName }}
+        {{- end }}
+        - --leader-elect={{ .Values.leaderElect }}
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        volumeMounts:
+        - name: netbox-token
+          mountPath: /var/run/secrets/netbox
+          readOnly: true
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: netbox-token
+        secret:
+          secretName: {{ required "netbox.tokenSecret.name is required" .Values.netbox.tokenSecret.name }}
+          items:
+          - key: {{ .Values.netbox.tokenSecret.key }}
+            path: {{ .Values.netbox.tokenSecret.key }}
+      terminationGracePeriodSeconds: 10
