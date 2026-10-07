@@ -30,7 +30,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator/test/utils"
+	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/test/utils"
 )
 
 // namespace where the project is deployed in

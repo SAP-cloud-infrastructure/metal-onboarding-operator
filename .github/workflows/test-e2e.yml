@@ -1,8 +1,7 @@
 name: E2E Tests
 
 on:
-  push:
-  pull_request:
+  workflow_dispatch: # disabled until repo is public
 
 jobs:
   test-e2e:

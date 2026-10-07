@@ -67,6 +67,9 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 # - CERT_MANAGER_INSTALL_SKIP=true
 KIND_CLUSTER ?= metal-onboarding-operator-test-e2e
 
+KIND_DEV_CLUSTER ?= metal-onboarding-operator
+KIND_REGISTRY_PORT ?= 5001
+
 .PHONY: setup-test-e2e
 setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 	@command -v $(KIND) >/dev/null 2>&1 || { \
@@ -89,6 +92,24 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+
+.PHONY: kind-create
+kind-create: ## Create the dev kind cluster with a local registry (idempotent).
+	KIND_CLUSTER_NAME=$(KIND_DEV_CLUSTER) KIND_REGISTRY_PORT=$(KIND_REGISTRY_PORT) KUBECTL=$(KUBECTL) \
+	  ./hack/kind-with-registry.sh
+
+.PHONY: kind-delete
+kind-delete: ## Delete the dev kind cluster and its local registry.
+	$(KIND) delete cluster --name=$(KIND_DEV_CLUSTER)
+	docker stop kind-registry-$(KIND_DEV_CLUSTER) && docker rm kind-registry-$(KIND_DEV_CLUSTER) || true
+
+.PHONY: tilt-up
+tilt-up: kind-create ## Start Tilt (creates dev cluster if needed).
+	tilt up --context kind-$(KIND_DEV_CLUSTER)
+
+.PHONY: tilt-down
+tilt-down: ## Tear down Tilt resources (does not delete the cluster).
+	tilt down --context kind-$(KIND_DEV_CLUSTER)
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -171,6 +192,22 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
 
+# Helm chart deployment variables
+HELM ?= helm
+HELM_RELEASE ?= metal-onboarding-operator
+HELM_NAMESPACE ?= metal-onboarding-operator
+HELM_VALUES ?=
+
+.PHONY: helm-deploy
+helm-deploy: manifests ## Deploy the operator via Helm (helm upgrade --install). Set HELM_VALUES for extra values.
+	"$(HELM)" upgrade --install "$(HELM_RELEASE)" charts/metal-onboarding-operator \
+		--namespace "$(HELM_NAMESPACE)" --create-namespace \
+		$(if $(HELM_VALUES),--values "$(HELM_VALUES)",)
+
+.PHONY: helm-undeploy
+helm-undeploy: ## Uninstall the Helm release.
+	"$(HELM)" uninstall "$(HELM_RELEASE)" --namespace "$(HELM_NAMESPACE)"
+
 ##@ Dependencies
 
 ## Location to install dependencies to
@@ -200,7 +237,7 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
   [ -n "$$v" ] || { echo "Set ENVTEST_K8S_VERSION manually (k8s.io/api replace has no tag)" >&2; exit 1; }; \
   printf '%s\n' "$$v" | sed -E 's/^v?[0-9]+\.([0-9]+).*/1.\1/')
 
-GOLANGCI_LINT_VERSION ?= v2.7.2
+GOLANGCI_LINT_VERSION ?= v2.14.0
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)

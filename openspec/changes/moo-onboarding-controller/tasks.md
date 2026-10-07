@@ -22,7 +22,7 @@
 
 ## 4. NetBox Provider Implementation
 
-- [ ] 4.1 Implement `NetBoxProvider.LookupByMAC` using the NetBox REST API; look up MAC → interface → device → cluster; return `ServerName` (device.Name), `OOBIP` (device.OOBIp.Address), `BMCHostname` (remoteboard interface DNS name, optional), `Labels` (10 topology labels: region, site.Slug, cluster.Name, cluster.Type.Slug, device.Name, bb-suffix, device.DeviceType.Slug, DeviceRole.Slug, Platform.Slug), and `ClusterGate`; verify unit tests with an httptest server cover: found device, device-not-found → `ErrNotFound`, 5xx → retriable error, wrong-cluster → `ClusterGate: elsewhere`
+- [x] 4.1 Implement `NetBoxProvider.LookupByMAC` using the NetBox REST API; look up MAC → interface → device → cluster; return `ServerName` (device.Name), `OOBIP` (device.OOBIp.Address), `BMCHostname` (remoteboard interface DNS name, optional), `Labels` (10 topology labels: region, site.Slug, cluster.Name, cluster.Type.Slug, device.Name, bb-suffix, device.DeviceType.Slug, DeviceRole.Slug, Platform.Slug), and `ClusterGate`; verify unit tests with an httptest server cover: found device, device-not-found → `ErrNotFound`, 5xx → retriable error, wrong-cluster → `ClusterGate: elsewhere`
 - [x] 4.2 Add operator flags `--netbox-url` and `--netbox-token-file`; wire into main.go and verify the operator starts with `--inventory-provider=netbox` and the flags populated
 
 ## 5. DHCPLease Watcher
@@ -46,12 +46,12 @@
 
 ## 8. Helm Chart and Deployment
 
-- [ ] 8.1 Scaffold a Helm chart in `charts/metal-onboarding-operator/` with Deployment, ServiceAccount, ClusterRole, ClusterRoleBinding, and CRD install; verify `helm template` renders without errors
-- [ ] 8.2 Add `--inventory-provider`, `--dhcp-lease-namespace`, `--netbox-url`, `--netbox-token-file` as chart values; verify `helm template --set inventoryProvider=crd` renders the correct flag in the Deployment
-- [ ] 8.3 Add a `make deploy` target using `helm upgrade --install` and verify it installs cleanly against a kind cluster with metaldhcp CRDs applied
+- [x] 8.1 Scaffold a Helm chart in `charts/metal-onboarding-operator/` with Deployment, ServiceAccount, ClusterRole, ClusterRoleBinding, and CRD install; verify `helm template` renders without errors
+- [x] 8.2 Add `--inventory-provider`, `--dhcp-lease-namespace`, `--netbox-url`, `--netbox-token-file` as chart values; verify `helm template --set inventoryProvider=crd` renders the correct flag in the Deployment
+- [x] 8.3 Add a `make deploy` target using `helm upgrade --install` and verify it installs cleanly against a kind cluster with metaldhcp CRDs applied
 
 ## 9. Integration Verification
 
 - [ ] 9.1 Against a kind cluster with metaldhcp CRDs applied: create a `DHCPLease` CR manually and verify an `OnboardingRequest` CR is created within 10 seconds
 - [ ] 9.2 With `--inventory-provider=crd` and a matching `ServerProfile`: create an `OnboardingRequest` and verify full phase progression to `Done` with a mock httptest Redfish endpoint; assert `BMC` CR has `bootstrap=true` and `manager-type` annotations
-- [ ] 9.3 Run `make test` and verify all unit and envtest tests pass
+- [x] 9.3 Run `make test` and verify all unit and envtest tests pass

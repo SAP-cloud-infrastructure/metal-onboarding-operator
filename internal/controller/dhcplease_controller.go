@@ -18,33 +18,51 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"maps"
+	"net/http"
+	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	corev1 "k8s.io/api/core/v1"
+	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 
-	onboardingv1alpha1 "github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator/api/v1alpha1"
-	dhcpshim "github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
+	dhcpshim "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
+	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/provider"
 )
 
-// DHCPLeaseController watches DHCPLease CRs and creates one OnboardingRequest per unique MAC address.
-// It does not perform any onboarding logic itself — that is handled by OnboardingRequestReconciler.
+const (
+	annotationBootstrap   = "onboarding.metal.ironcore.dev/bootstrap"
+	annotationManagerType = "onboarding.metal.ironcore.dev/manager-type"
+
+	redfishProbeTimeout = 10 * time.Second
+)
+
+// DHCPLeaseController watches DHCPLease CRs and drives the full onboarding workflow:
+// inventory lookup → Redfish probe → BMC CR creation.
+// The BMC CR with bootstrap=true annotation is the handoff signal to metal-maintenance-operator.
 type DHCPLeaseController struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	Namespace string // namespace where OnboardingRequests are created
+	Scheme            *runtime.Scheme
+	InventoryProvider provider.InventoryProvider
+	// RedfishBaseURL overrides the Redfish endpoint base URL, used in tests.
+	// When empty, the controller uses http://<lease.Spec.IP> as the base URL.
+	RedfishBaseURL string
 }
 
 // +kubebuilder:rbac:groups=dhcp.metal.ironcore.dev,resources=dhcpleases,verbs=get;list;watch
-// +kubebuilder:rbac:groups=onboarding.metal.ironcore.dev,resources=onboardingrequests,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;create;update;patch
 
-// Reconcile watches a DHCPLease and ensures exactly one OnboardingRequest exists for its MAC address.
-// Deleting the DHCPLease does NOT delete the OnboardingRequest — onboarding is a one-way gate.
+// Reconcile drives the full onboarding workflow for a single DHCPLease in one pass.
+// The reconciler is fully idempotent: if a BMC CR already exists for the server, the
+// CreateOrUpdate call is a no-op (spec is only written on creation).
 func (r *DHCPLeaseController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -59,61 +77,133 @@ func (r *DHCPLeaseController) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	// Derive a deterministic name for the OnboardingRequest from the MAC address.
-	// Colons are replaced with hyphens to satisfy Kubernetes name constraints.
-	orName := macToName(mac)
-	namespace := r.Namespace
-	if namespace == "" {
-		namespace = req.Namespace
+	ip := lease.Spec.IP
+	if ip == "" {
+		log.Info("DHCPLease has no IP, skipping", "lease", req.NamespacedName)
+		return ctrl.Result{}, nil
 	}
 
-	or := &onboardingv1alpha1.OnboardingRequest{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      orName,
-			Namespace: namespace,
-		},
-	}
-
-	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, or, func() error {
-		// Only populate spec on first creation; never overwrite an in-progress OnboardingRequest.
-		// ResourceVersion is empty when the object does not yet exist in the API server.
-		if or.ResourceVersion == "" {
-			or.Spec = onboardingv1alpha1.OnboardingRequestSpec{
-				MACAddress: mac,
-				AssignedIP: lease.Spec.IPAddress,
-				DHCPLeaseRef: &corev1.ObjectReference{
-					APIVersion: dhcpshim.GroupVersion.String(),
-					Kind:       "DHCPLease",
-					Namespace:  req.Namespace,
-					Name:       req.Name,
-				},
-			}
-		}
-		return nil
-	})
+	// --- 1. Inventory lookup ---
+	rec, err := r.InventoryProvider.LookupByMAC(ctx, mac)
 	if err != nil {
-		return ctrl.Result{}, err
+		if err == provider.ErrNotFound {
+			log.Info("MAC not found in inventory, requeuing", "mac", mac)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("inventory lookup for MAC %s: %w", mac, err)
 	}
 
-	if result == controllerutil.OperationResultCreated {
-		log.Info("created OnboardingRequest", "mac", mac, "name", orName)
+	switch rec.ClusterGate {
+	case provider.ClusterGateElsewhere:
+		log.Info("server belongs to another cluster, skipping", "mac", mac, "server", rec.ServerName)
+		return ctrl.Result{}, nil
+	case provider.ClusterGateUnknown:
+		log.Info("cluster membership unknown, requeuing", "mac", mac)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
+	// --- 2. Redfish probe ---
+	managerType, err := probeRedfish(ctx, r.redfishURL(ip))
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("redfish probe for %s: %w", ip, err)
+	}
+	if managerType == "" {
+		return ctrl.Result{}, fmt.Errorf("redfish probe for %s: no ManagerType in response", ip)
+	}
+
+	// --- 3. CreateOrUpdate BMC ---
+	oobIP, err := metalv1alpha1.ParseIP(ip)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("parse lease IP %q: %w", ip, err)
+	}
+
+	bmc := &metalv1alpha1.BMC{}
+	err = r.Get(ctx, types.NamespacedName{Name: rec.ServerName}, bmc)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("get BMC %s: %w", rec.ServerName, err)
+	}
+
+	if apierrors.IsNotFound(err) {
+		bmc = &metalv1alpha1.BMC{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   rec.ServerName,
+				Labels: rec.Labels,
+				Annotations: map[string]string{
+					annotationBootstrap:   "true",
+					annotationManagerType: managerType,
+				},
+			},
+			Spec: metalv1alpha1.BMCSpec{
+				Endpoint: &metalv1alpha1.InlineEndpoint{IP: oobIP},
+				Protocol: metalv1alpha1.Protocol{
+					Name: metalv1alpha1.ProtocolNameRedfish,
+					Port: 443,
+				},
+			},
+		}
+		if rec.BMCHostname != "" {
+			bmc.Spec.Hostname = &rec.BMCHostname
+		}
+		if err := r.Create(ctx, bmc); err != nil {
+			return ctrl.Result{}, fmt.Errorf("create BMC %s: %w", rec.ServerName, err)
+		}
+	} else {
+		// BMC already exists — only update labels and handoff annotations.
+		patch := client.MergeFrom(bmc.DeepCopy())
+		if bmc.Labels == nil {
+			bmc.Labels = map[string]string{}
+		}
+		maps.Copy(bmc.Labels, rec.Labels)
+		if bmc.Annotations == nil {
+			bmc.Annotations = map[string]string{}
+		}
+		bmc.Annotations[annotationBootstrap] = "true"
+		bmc.Annotations[annotationManagerType] = managerType
+		if err := r.Patch(ctx, bmc, patch); err != nil {
+			return ctrl.Result{}, fmt.Errorf("patch BMC %s: %w", rec.ServerName, err)
+		}
+	}
+
+	log.Info("BMC ready", "name", rec.ServerName, "managerType", managerType)
 	return ctrl.Result{}, nil
 }
 
-// macToName converts a MAC address string to a valid Kubernetes resource name.
-// "aa:bb:cc:dd:ee:ff" → "mac-aa-bb-cc-dd-ee-ff"
-func macToName(mac string) string {
-	name := "mac-"
-	for i, c := range mac {
-		if c == ':' {
-			name += "-"
-		} else {
-			name += string(mac[i])
-		}
+// redfishURL returns the Redfish base URL for the given IP.
+func (r *DHCPLeaseController) redfishURL(ip string) string {
+	if r.RedfishBaseURL != "" {
+		return r.RedfishBaseURL
 	}
-	return name
+	return fmt.Sprintf("http://%s", ip)
+}
+
+// probeRedfish performs an unauthenticated GET /redfish/v1 and extracts the ManagerType.
+func probeRedfish(ctx context.Context, baseURL string) (string, error) {
+	url := baseURL + "/redfish/v1"
+	reqCtx, cancel := context.WithTimeout(ctx, redfishProbeTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	var body struct {
+		ManagerType string `json:"ManagerType"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", err
+	}
+	return body.ManagerType, nil
 }
 
 // SetupWithManager registers the DHCPLeaseController with the manager.

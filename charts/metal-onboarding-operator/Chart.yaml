@@ -1,0 +1,6 @@
+apiVersion: v2
+name: metal-onboarding-operator
+description: Kubernetes operator for bare-metal server onboarding via DHCP and NetBox/CRD inventory
+type: application
+version: 0.1.0
+appVersion: "latest"

@@ -18,108 +18,244 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"time"
 
+	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	onboardingv1alpha1 "github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator/api/v1alpha1"
-	dhcpshim "github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
+	dhcpshim "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
+	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/provider"
 )
 
-func newDHCPTestScheme() *runtime.Scheme {
+// fakeInventory is a trivial InventoryProvider used in unit tests.
+type fakeInventory struct {
+	record *provider.InventoryRecord
+	err    error
+}
+
+func (f *fakeInventory) LookupByMAC(_ context.Context, _ string) (*provider.InventoryRecord, error) {
+	return f.record, f.err
+}
+
+func newFakeScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
-	_ = onboardingv1alpha1.AddToScheme(s)
 	_ = dhcpshim.AddToScheme(s)
+	_ = metalv1alpha1.AddToScheme(s)
 	return s
 }
 
-var _ = Describe("DHCPLeaseController unit tests", func() {
-	const ns = "default"
-	const testMAC = "aa:bb:cc:dd:ee:ff"
+func fakeRedfishServer(managerType string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/redfish/v1" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		body, _ := json.Marshal(map[string]string{"ManagerType": managerType})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+}
 
-	newLease := func(name, mac, ip string) *dhcpshim.DHCPLease {
+var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
+	const (
+		ns     = "default"
+		testIP = "10.0.0.1"
+	)
+
+	newLease := func(name, mac string) *dhcpshim.DHCPLease {
 		return &dhcpshim.DHCPLease{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
-			Spec:       dhcpshim.DHCPLeaseSpec{MACAddress: mac, IPAddress: ip},
+			Spec:       dhcpshim.DHCPLeaseSpec{MACAddress: mac, IP: testIP},
 		}
 	}
 
-	It("creates an OnboardingRequest for a new DHCPLease", func() {
-		lease := newLease("lease-1", testMAC, "10.0.0.1")
-		s := newDHCPTestScheme()
+	It("skips and creates no BMC when ClusterGateElsewhere", func() {
+		inv := &fakeInventory{record: &provider.InventoryRecord{
+			ClusterGate: provider.ClusterGateElsewhere,
+			ServerName:  "some-server",
+		}}
+
+		lease := newLease("lease-2", "aa:bb:cc:dd:ee:ff")
+		s := newFakeScheme()
 		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
-		r := &DHCPLeaseController{Client: cl, Scheme: s, Namespace: ns}
+		r := &DHCPLeaseController{Client: cl, Scheme: s, InventoryProvider: inv}
 
 		_, err := r.Reconcile(context.Background(), ctrl.Request{
-			NamespacedName: types.NamespacedName{Name: "lease-1", Namespace: ns},
+			NamespacedName: types.NamespacedName{Name: "lease-2", Namespace: ns},
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		or := &onboardingv1alpha1.OnboardingRequest{}
-		Expect(cl.Get(context.Background(), types.NamespacedName{Name: "mac-aa-bb-cc-dd-ee-ff", Namespace: ns}, or)).To(Succeed())
-		Expect(or.Spec.MACAddress).To(Equal(testMAC))
-		Expect(or.Spec.AssignedIP).To(Equal("10.0.0.1"))
-		Expect(or.Spec.DHCPLeaseRef).NotTo(BeNil())
+		bmcList := &metalv1alpha1.BMCList{}
+		Expect(cl.List(context.Background(), bmcList)).To(Succeed())
+		Expect(bmcList.Items).To(BeEmpty())
 	})
 
-	It("does not create a duplicate OnboardingRequest for the same MAC", func() {
-		lease1 := newLease("lease-1", testMAC, "10.0.0.1")
-		lease2 := newLease("lease-2", testMAC, "10.0.0.2")
-		s := newDHCPTestScheme()
-		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease1, lease2).Build()
-		r := &DHCPLeaseController{Client: cl, Scheme: s, Namespace: ns}
+	It("returns no error and requeues when provider returns ErrNotFound", func() {
+		inv := &fakeInventory{err: provider.ErrNotFound}
 
-		for _, name := range []string{"lease-1", "lease-2"} {
-			_, err := r.Reconcile(context.Background(), ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: name, Namespace: ns},
-			})
-			Expect(err).NotTo(HaveOccurred())
-		}
+		lease := newLease("lease-3", "aa:bb:cc:dd:ee:ff")
+		s := newFakeScheme()
+		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
+		r := &DHCPLeaseController{Client: cl, Scheme: s, InventoryProvider: inv}
 
-		list := &onboardingv1alpha1.OnboardingRequestList{}
-		Expect(cl.List(context.Background(), list)).To(Succeed())
-		Expect(list.Items).To(HaveLen(1))
-		Expect(list.Items[0].Spec.AssignedIP).To(Equal("10.0.0.1"))
-	})
-
-	It("OnboardingRequest survives when the DHCPLease is deleted", func() {
-		existingOR := &onboardingv1alpha1.OnboardingRequest{
-			ObjectMeta: metav1.ObjectMeta{Name: "mac-aa-bb-cc-dd-ee-ff", Namespace: ns},
-			Spec:       onboardingv1alpha1.OnboardingRequestSpec{MACAddress: testMAC},
-		}
-		s := newDHCPTestScheme()
-		// No lease in the fake client — simulates a deleted lease triggering reconcile.
-		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(existingOR).Build()
-		r := &DHCPLeaseController{Client: cl, Scheme: s, Namespace: ns}
-
-		_, err := r.Reconcile(context.Background(), ctrl.Request{
-			NamespacedName: types.NamespacedName{Name: "lease-1", Namespace: ns},
+		result, err := r.Reconcile(context.Background(), ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: "lease-3", Namespace: ns},
 		})
 		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+	})
 
-		or := &onboardingv1alpha1.OnboardingRequest{}
-		Expect(cl.Get(context.Background(), types.NamespacedName{Name: "mac-aa-bb-cc-dd-ee-ff", Namespace: ns}, or)).To(Succeed())
-		Expect(or.Spec.MACAddress).To(Equal(testMAC))
+	It("returns an error when the Redfish probe fails", func() {
+		inv := &fakeInventory{record: &provider.InventoryRecord{
+			ClusterGate: provider.ClusterGateBelongs,
+			ServerName:  "some-server",
+			OOBIP:       testIP,
+			Labels:      map[string]string{},
+		}}
+
+		lease := newLease("lease-4", "aa:bb:cc:dd:ee:ff")
+		s := newFakeScheme()
+		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
+		r := &DHCPLeaseController{
+			Client:            cl,
+			Scheme:            s,
+			InventoryProvider: inv,
+			RedfishBaseURL:    "http://127.0.0.1:1", // nothing listening
+		}
+
+		_, err := r.Reconcile(context.Background(), ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: "lease-4", Namespace: ns},
+		})
+		Expect(err).To(HaveOccurred())
 	})
 
 	It("skips a DHCPLease with no MACAddress", func() {
-		lease := newLease("lease-empty", "", "10.0.0.3")
-		s := newDHCPTestScheme()
+		inv := &fakeInventory{}
+		lease := newLease("lease-empty", "")
+		s := newFakeScheme()
 		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
-		r := &DHCPLeaseController{Client: cl, Scheme: s, Namespace: ns}
+		r := &DHCPLeaseController{Client: cl, Scheme: s, InventoryProvider: inv}
 
 		_, err := r.Reconcile(context.Background(), ctrl.Request{
 			NamespacedName: types.NamespacedName{Name: "lease-empty", Namespace: ns},
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		list := &onboardingv1alpha1.OnboardingRequestList{}
-		Expect(cl.List(context.Background(), list)).To(Succeed())
-		Expect(list.Items).To(BeEmpty())
+		bmcList := &metalv1alpha1.BMCList{}
+		Expect(cl.List(context.Background(), bmcList)).To(Succeed())
+		Expect(bmcList.Items).To(BeEmpty())
+	})
+})
+
+var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
+	const (
+		ns         = "default"
+		testMAC    = "aa:bb:cc:dd:ee:ff"
+		testIP     = "10.0.0.1"
+		serverName = "rabc12-bb01"
+	)
+
+	var redfishServer *httptest.Server
+	BeforeEach(func() {
+		redfishServer = fakeRedfishServer("iDRAC")
+	})
+	AfterEach(func() {
+		redfishServer.Close()
+	})
+
+	newLease := func(name string) *dhcpshim.DHCPLease {
+		return &dhcpshim.DHCPLease{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("%s-%d", name, time.Now().UnixNano()),
+				Namespace: ns,
+			},
+			Spec: dhcpshim.DHCPLeaseSpec{MACAddress: testMAC, IP: testIP},
+		}
+	}
+
+	It("creates a BMC with correct annotations, labels, and spec", func() {
+		inv := &fakeInventory{record: &provider.InventoryRecord{
+			ClusterGate: provider.ClusterGateBelongs,
+			ServerName:  serverName,
+			OOBIP:       testIP,
+			Labels: map[string]string{
+				"topology.kubernetes.io/region": "eu-de-1",
+			},
+		}}
+
+		lease := newLease("bmc-create")
+		Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, lease) })
+
+		r := &DHCPLeaseController{
+			Client:            k8sClient,
+			Scheme:            k8sClient.Scheme(),
+			InventoryProvider: inv,
+			RedfishBaseURL:    redfishServer.URL,
+		}
+
+		_, err := r.Reconcile(ctx, ctrl.Request{
+			NamespacedName: client.ObjectKeyFromObject(lease),
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		bmc := &metalv1alpha1.BMC{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serverName}, bmc)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, bmc) })
+
+		Expect(bmc.Annotations).To(HaveKeyWithValue(annotationBootstrap, "true"))
+		Expect(bmc.Annotations).To(HaveKeyWithValue(annotationManagerType, "iDRAC"))
+		Expect(bmc.Labels).To(HaveKeyWithValue("topology.kubernetes.io/region", "eu-de-1"))
+		Expect(bmc.Spec.Protocol.Name).To(Equal(metalv1alpha1.ProtocolNameRedfish))
+		Expect(bmc.Spec.Protocol.Port).To(Equal(int32(443)))
+	})
+
+	It("is idempotent: reconciling twice produces one BMC unchanged", func() {
+		uniqueServer := fmt.Sprintf("server-%d", time.Now().UnixNano())
+		inv := &fakeInventory{record: &provider.InventoryRecord{
+			ClusterGate: provider.ClusterGateBelongs,
+			ServerName:  uniqueServer,
+			OOBIP:       testIP,
+			Labels:      map[string]string{},
+		}}
+
+		lease := newLease("bmc-idem")
+		Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, lease) })
+
+		r := &DHCPLeaseController{
+			Client:            k8sClient,
+			Scheme:            k8sClient.Scheme(),
+			InventoryProvider: inv,
+			RedfishBaseURL:    redfishServer.URL,
+		}
+
+		req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(lease)}
+		for range 2 {
+			_, err := r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		bmcList := &metalv1alpha1.BMCList{}
+		Expect(k8sClient.List(ctx, bmcList)).To(Succeed())
+		found := 0
+		for _, b := range bmcList.Items {
+			if b.Name == uniqueServer {
+				found++
+				_ = k8sClient.Delete(ctx, &b)
+			}
+		}
+		Expect(found).To(Equal(1))
 	})
 })

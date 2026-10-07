@@ -36,12 +36,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	onboardingv1alpha1 "github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator/api/v1alpha1"
-	"github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator/internal/controller"
-	dhcpshim "github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
-	crdprovider "github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator/internal/provider/crd"
-	netboxprovider "github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator/internal/provider/netbox"
-	"github.wdf.sap.corp/sap-cloud-infrastructure/metal-onboarding-operator/internal/provider"
+	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/controller"
+	dhcpshim "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
+	netboxprovider "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/provider/netbox"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -52,7 +49,6 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(onboardingv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(dhcpshim.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
@@ -66,7 +62,6 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
-	var inventoryProvider string
 	var dhcpLeaseNamespace string
 	var netboxURL string
 	var netboxTokenFile string
@@ -90,16 +85,14 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	flag.StringVar(&inventoryProvider, "inventory-provider", "crd",
-		"Inventory provider backend to use for MAC lookups. One of: netbox, crd.")
 	flag.StringVar(&dhcpLeaseNamespace, "dhcp-lease-namespace", "",
 		"Namespace to watch for DHCPLease CRs. Defaults to the operator's namespace.")
 	flag.StringVar(&netboxURL, "netbox-url", "",
-		"Base URL of the NetBox API (required when --inventory-provider=netbox).")
+		"Base URL of the NetBox API.")
 	flag.StringVar(&netboxTokenFile, "netbox-token-file", "",
-		"Path to a file containing the NetBox API token (required when --inventory-provider=netbox).")
+		"Path to a file containing the NetBox API token.")
 	flag.StringVar(&clusterName, "cluster-name", "",
-		"Name of this cluster, used to gate onboarding when --inventory-provider=netbox.")
+		"Name of this cluster, used to gate onboarding to servers that belong here.")
 
 	opts := zap.Options{
 		Development: true,
@@ -108,6 +101,14 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	if netboxURL == "" || netboxTokenFile == "" {
+		setupLog.Error(
+			fmt.Errorf("--netbox-url and --netbox-token-file are required"),
+			"invalid configuration",
+		)
+		os.Exit(1)
+	}
 
 	disableHTTP2 := func(c *tls.Config) {
 		setupLog.Info("disabling http/2")
@@ -166,43 +167,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Build the InventoryProvider based on the --inventory-provider flag.
-	var invProvider provider.InventoryProvider
-	switch inventoryProvider {
-	case "netbox":
-		if netboxURL == "" || netboxTokenFile == "" {
-			setupLog.Error(fmt.Errorf("--netbox-url and --netbox-token-file are required for --inventory-provider=netbox"), "invalid configuration")
-			os.Exit(1)
-		}
-		invProvider = netboxprovider.New(netboxURL, netboxTokenFile, clusterName)
-	case "crd":
-		operatorNamespace := os.Getenv("POD_NAMESPACE")
-		if operatorNamespace == "" {
-			operatorNamespace = "default"
-		}
-		invProvider = crdprovider.New(mgr.GetClient(), operatorNamespace)
-	default:
-		setupLog.Error(fmt.Errorf("unknown --inventory-provider %q: must be netbox or crd", inventoryProvider), "invalid configuration")
-		os.Exit(1)
-	}
-
-	// Wire DHCPLeaseController.
 	if err := (&controller.DHCPLeaseController{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Namespace: dhcpLeaseNamespace,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "DHCPLease")
-		os.Exit(1)
-	}
-
-	// Wire OnboardingRequestReconciler with the selected InventoryProvider.
-	if err := (&controller.OnboardingRequestReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
-		InventoryProvider: invProvider,
+		InventoryProvider: netboxprovider.New(netboxURL, netboxTokenFile, clusterName),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "OnboardingRequest")
+		setupLog.Error(err, "unable to create controller", "controller", "DHCPLease")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
@@ -217,8 +187,8 @@ func main() {
 	}
 
 	setupLog.Info("starting manager",
-		"inventory-provider", inventoryProvider,
 		"dhcp-lease-namespace", dhcpLeaseNamespace,
+		"cluster-name", clusterName,
 		"leader-elect", enableLeaderElection,
 	)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
