@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	"sigs.k8s.io/yaml"
 
 	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/controller"
 	dhcpshim "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
@@ -66,6 +67,7 @@ func main() {
 	var netboxURL string
 	var netboxTokenFile string
 	var clusterName string
+	var labelMapFile string
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -93,6 +95,8 @@ func main() {
 		"Path to a file containing the NetBox API token.")
 	flag.StringVar(&clusterName, "cluster-name", "",
 		"Name of this cluster, used to gate onboarding to servers that belong here.")
+	flag.StringVar(&labelMapFile, "label-map-file", "",
+		"Path to a YAML file mapping Kubernetes label keys to NetBox device JSON paths.")
 
 	opts := zap.Options{
 		Development: true,
@@ -108,6 +112,19 @@ func main() {
 			"invalid configuration",
 		)
 		os.Exit(1)
+	}
+
+	var labelMap map[string]string
+	if labelMapFile != "" {
+		raw, err := os.ReadFile(labelMapFile)
+		if err != nil {
+			setupLog.Error(err, "unable to read label-map-file", "path", labelMapFile)
+			os.Exit(1)
+		}
+		if err := yaml.Unmarshal(raw, &labelMap); err != nil {
+			setupLog.Error(err, "unable to parse label-map-file", "path", labelMapFile)
+			os.Exit(1)
+		}
 	}
 
 	disableHTTP2 := func(c *tls.Config) {
@@ -170,7 +187,7 @@ func main() {
 	if err := (&controller.DHCPLeaseController{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
-		InventoryProvider: netboxprovider.New(netboxURL, netboxTokenFile, clusterName),
+		InventoryProvider: netboxprovider.New(netboxURL, netboxTokenFile, clusterName, labelMap),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DHCPLease")
 		os.Exit(1)

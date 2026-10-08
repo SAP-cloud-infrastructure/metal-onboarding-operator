@@ -30,6 +30,9 @@ spec:
         - --cluster-name={{ .Values.clusterName }}
         {{- end }}
         - --leader-elect={{ .Values.leaderElect }}
+        {{- if .Values.labelMap }}
+        - --label-map-file=/etc/moo/label-map.yaml
+        {{- end }}
         env:
         - name: POD_NAMESPACE
           valueFrom:
@@ -39,6 +42,11 @@ spec:
         - name: netbox-token
           mountPath: /var/run/secrets/netbox
           readOnly: true
+        {{- if .Values.labelMap }}
+        - name: label-map
+          mountPath: /etc/moo
+          readOnly: true
+        {{- end }}
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
         livenessProbe:
@@ -60,4 +68,9 @@ spec:
           items:
           - key: {{ .Values.netbox.tokenSecret.key }}
             path: {{ .Values.netbox.tokenSecret.key }}
+      {{- if .Values.labelMap }}
+      - name: label-map
+        configMap:
+          name: metal-onboarding-operator-label-map
+      {{- end }}
       terminationGracePeriodSeconds: 10

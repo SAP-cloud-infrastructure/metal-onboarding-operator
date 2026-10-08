@@ -40,28 +40,35 @@ type Provider struct {
 	tokenFile   string
 	clusterName string
 	httpClient  *http.Client
+	// labelMap optionally maps Kubernetes label keys to dot-separated NetBox JSON paths
+	// (e.g. "kubernetes.metal.cloud.sap/rack" → "custom_fields.rack").
+	// These are applied on top of the hardcoded label set in LookupByMAC.
+	labelMap map[string]string
 }
 
 // New returns a NetBox-backed InventoryProvider.
 // baseURL is the NetBox API base (e.g. "https://netbox.example.com").
 // tokenFile is the path to a file containing the NetBox API token.
 // clusterName is this operator's cluster name, used to gate ClusterGate decisions.
-func New(baseURL, tokenFile, clusterName string) *Provider {
+// labelMap optionally maps label keys to NetBox device JSON paths; pass nil for none.
+func New(baseURL, tokenFile, clusterName string, labelMap map[string]string) *Provider {
 	return &Provider{
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		tokenFile:   tokenFile,
 		clusterName: clusterName,
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		labelMap:    labelMap,
 	}
 }
 
 // NewWithHTTPClient constructs a Provider with a custom HTTP client (for testing).
-func NewWithHTTPClient(baseURL, token, clusterName string, hc *http.Client) *Provider {
+func NewWithHTTPClient(baseURL, token, clusterName string, labelMap map[string]string, hc *http.Client) *Provider {
 	return &Provider{
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		tokenFile:   token, // treated as literal token value when no path separator is present
 		clusterName: clusterName,
 		httpClient:  hc,
+		labelMap:    labelMap,
 	}
 }
 
@@ -92,7 +99,7 @@ func (p *Provider) LookupByMAC(ctx context.Context, mac string) (*provider.Inven
 
 	deviceID := ifaces[0].Device.ID
 
-	device, err := p.getDevice(ctx, token, deviceID)
+	device, rawDevice, err := p.getDevice(ctx, token, deviceID)
 	if err != nil {
 		return nil, fmt.Errorf("netbox: get device %d: %w", deviceID, err)
 	}
@@ -126,6 +133,11 @@ func (p *Provider) LookupByMAC(ctx context.Context, mac string) (*provider.Inven
 		"kubernetes.metal.cloud.sap/type":         device.DeviceType.Slug,
 		"kubernetes.metal.cloud.sap/role":         device.DeviceRole.Slug,
 		"kubernetes.metal.cloud.sap/platform":     device.Platform.Slug,
+	}
+	for labelKey, jsonPath := range p.labelMap {
+		if v := walkPath(rawDevice, jsonPath); v != "" {
+			labels[labelKey] = v
+		}
 	}
 
 	clusterGate := provider.ClusterGateUnknown
@@ -219,34 +231,68 @@ func (p *Provider) authHeader(token string) string {
 }
 
 func (p *Provider) get(ctx context.Context, token, path string, query url.Values, out any) error {
+	_, err := p.getRaw(ctx, token, path, query, out)
+	return err
+}
+
+// getRaw performs a GET, decodes into out, and also returns the raw map for path walking.
+func (p *Provider) getRaw(ctx context.Context, token, path string, query url.Values, out any) (map[string]any, error) {
 	u := p.baseURL + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", p.authHeader(token))
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("GET %s: %w", path, err)
+		return nil, fmt.Errorf("GET %s: %w", path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return fmt.Errorf("GET %s: read body: %w", path, err)
+		return nil, fmt.Errorf("GET %s: read body: %w", path, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GET %s: HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("GET %s: HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("GET %s: decode: %w", path, err)
+		return nil, fmt.Errorf("GET %s: decode: %w", path, err)
 	}
-	return nil
+	var raw map[string]any
+	_ = json.Unmarshal(body, &raw)
+	return raw, nil
+}
+
+// walkPath traverses obj using a dot-separated path and returns the leaf as a string.
+// Returns "" if any segment is missing or the leaf is not a string or number.
+func walkPath(obj map[string]any, path string) string {
+	parts := strings.Split(path, ".")
+	var cur any = obj
+	for _, part := range parts {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return ""
+		}
+		cur = m[part]
+	}
+	switch v := cur.(type) {
+	case string:
+		return v
+	case float64:
+		return fmt.Sprintf("%g", v)
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	}
+	return ""
 }
 
 // --- NetBox API response types ---
@@ -330,12 +376,13 @@ func (p *Provider) listInterfaces(ctx context.Context, token string, q url.Value
 	return page.Results, nil
 }
 
-func (p *Provider) getDevice(ctx context.Context, token string, id int) (*nbDevice, error) {
+func (p *Provider) getDevice(ctx context.Context, token string, id int) (*nbDevice, map[string]any, error) {
 	var d nbDevice
-	if err := p.get(ctx, token, fmt.Sprintf("/api/dcim/devices/%d/", id), nil, &d); err != nil {
-		return nil, err
+	raw, err := p.getRaw(ctx, token, fmt.Sprintf("/api/dcim/devices/%d/", id), nil, &d)
+	if err != nil {
+		return nil, nil, err
 	}
-	return &d, nil
+	return &d, raw, nil
 }
 
 func (p *Provider) getSite(ctx context.Context, token string, id int) (*nbSite, error) {

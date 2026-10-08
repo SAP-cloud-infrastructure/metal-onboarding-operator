@@ -110,7 +110,7 @@ var _ = Describe("NetBox Provider", func() {
 		srv := httptest.NewServer(mux)
 		DeferCleanup(srv.Close)
 
-		p := netboxprovider.NewWithHTTPClient(srv.URL, "testtoken", testCluster, srv.Client())
+		p := netboxprovider.NewWithHTTPClient(srv.URL, "testtoken", testCluster, nil, srv.Client())
 		rec, err := p.LookupByMAC(ctx, testMAC)
 
 		Expect(err).NotTo(HaveOccurred())
@@ -143,7 +143,7 @@ var _ = Describe("NetBox Provider", func() {
 		}))
 		DeferCleanup(srv.Close)
 
-		p := netboxprovider.NewWithHTTPClient(srv.URL, "testtoken", testCluster, srv.Client())
+		p := netboxprovider.NewWithHTTPClient(srv.URL, "testtoken", testCluster, nil, srv.Client())
 		_, err := p.LookupByMAC(ctx, "de:ad:be:ef:00:00")
 		Expect(err).To(MatchError(provider.ErrNotFound))
 	})
@@ -155,7 +155,7 @@ var _ = Describe("NetBox Provider", func() {
 		}))
 		DeferCleanup(srv.Close)
 
-		p := netboxprovider.NewWithHTTPClient(srv.URL, "testtoken", testCluster, srv.Client())
+		p := netboxprovider.NewWithHTTPClient(srv.URL, "testtoken", testCluster, nil, srv.Client())
 		_, err := p.LookupByMAC(ctx, testMAC)
 		Expect(err).To(HaveOccurred())
 		Expect(err).NotTo(MatchError(provider.ErrNotFound))
@@ -202,10 +202,64 @@ var _ = Describe("NetBox Provider", func() {
 		srv := httptest.NewServer(mux)
 		DeferCleanup(srv.Close)
 
-		p := netboxprovider.NewWithHTTPClient(srv.URL, "testtoken", testCluster, srv.Client())
+		p := netboxprovider.NewWithHTTPClient(srv.URL, "testtoken", testCluster, nil, srv.Client())
 		rec, err := p.LookupByMAC(ctx, testMAC)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rec.ClusterGate).To(Equal(provider.ClusterGateElsewhere))
+	})
+
+	It("applies labelMap entries from raw NetBox JSON paths", func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/api/dcim/interfaces/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Query().Get("mac_address") != "" {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"count": 1,
+					"results": []any{
+						map[string]any{"id": 42, "name": "eth0", "device": map[string]any{"id": 7, "name": testDeviceName}},
+					},
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"count": 0, "results": []any{}})
+		})
+		mux.HandleFunc("/api/dcim/devices/7/", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 7, "name": testDeviceName,
+				"oob_ip":      map[string]any{"address": testOOBIP, "dns_name": ""},
+				"site":        map[string]any{"id": 3, "slug": testSiteSlug},
+				"cluster":     map[string]any{"id": 5, "name": testCluster, "type": map[string]any{"slug": "openstack"}},
+				"device_type": map[string]any{"slug": "r640"},
+				"device_role": map[string]any{"slug": "baremetal"},
+				"platform":    map[string]any{"slug": "ubuntu"},
+				"custom_fields": map[string]any{
+					"rack": "ra-bc-12",
+				},
+			})
+		})
+		mux.HandleFunc("/api/dcim/sites/3/", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 3, "slug": testSiteSlug, "region": map[string]any{"id": 1, "slug": testRegionSlug},
+			})
+		})
+		mux.HandleFunc("/api/dcim/regions/1/", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 1, "slug": testRegionSlug})
+		})
+
+		srv := httptest.NewServer(mux)
+		DeferCleanup(srv.Close)
+
+		labelMap := map[string]string{
+			"kubernetes.metal.cloud.sap/rack": "custom_fields.rack",
+		}
+		p := netboxprovider.NewWithHTTPClient(srv.URL, "testtoken", testCluster, labelMap, srv.Client())
+		rec, err := p.LookupByMAC(ctx, testMAC)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rec.Labels).To(HaveKeyWithValue("kubernetes.metal.cloud.sap/rack", "ra-bc-12"))
 	})
 })
