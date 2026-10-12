@@ -1,0 +1,21 @@
+# Local dev overrides for Tilt (make tilt-up).
+# The image is pushed to the local kind registry by Tilt; no pull secret needed.
+
+image:
+  repository: localhost:5001/metal-onboarding-operator
+  tag: dev
+  pullPolicy: Always
+
+# Single replica, no leader election needed locally.
+replicaCount: 1
+leaderElect: false
+
+# Watch DHCPLease CRs in the default namespace for local testing.
+dhcpLeaseNamespace: default
+
+# NetBox is required; point at a local or dev NetBox instance.
+netbox:
+  url: "http://netbox.local"
+  tokenSecret:
+    name: netbox-token
+    key: token

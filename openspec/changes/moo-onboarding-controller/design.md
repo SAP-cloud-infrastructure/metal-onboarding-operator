@@ -51,9 +51,21 @@ type InventoryProvider interface {
 }
 ```
 
-`InventoryRecord` contains only what moo needs: cluster gate and OOB IP. mmo performs its own discovery via probe image and does not consume this record.
+`InventoryRecord` contains what moo needs to create the `BMC` object, matching argora's NetBox data:
 
-Implementations: `NetBoxProvider` (HTTP client to NetBox REST API) and `CRDProvider` (reads `ServerProfile` + `SiteConfig` CRs). Selected by operator flag `--inventory-provider=netbox|crd`.
+```go
+type InventoryRecord struct {
+    ClusterGate ClusterGate        // belongs / elsewhere / unknown
+    ServerName  string             // used as BMC object metadata.name (= NetBox device.Name)
+    OOBIP       string             // BMC spec.endpoint.ip (= device.OOBIp.Address)
+    BMCHostname string             // optional; BMC spec.hostname (= remoteboard DNS from IPAM)
+    Labels      map[string]string  // applied to BMC metadata.labels (topology + cluster labels)
+}
+```
+
+The 10 labels argora sets (derived from region, site slug, cluster name, cluster type, device name, bb suffix, device type/role/platform) must be populated by the NetBox provider. The CRD provider populates what is declared in `ServerProfile`; minimal labels are acceptable for the CRD case.
+
+mmo performs its own discovery via probe image and does not consume this record.
 
 **Alternative considered**: Runtime dynamic selection per `OnboardingRequest`. Rejected: adds complexity for a configuration that is per-cluster, not per-server.
 

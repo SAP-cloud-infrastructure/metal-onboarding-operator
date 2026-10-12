@@ -1,0 +1,41 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "metal-onboarding-operator.fullname" . }}
+  labels:
+    {{- include "metal-onboarding-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - dhcp.metal.ironcore.dev
+  resources:
+  - dhcpleases
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - bmcs
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "metal-onboarding-operator.fullname" . }}
+  labels:
+    {{- include "metal-onboarding-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "metal-onboarding-operator.fullname" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "metal-onboarding-operator.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
