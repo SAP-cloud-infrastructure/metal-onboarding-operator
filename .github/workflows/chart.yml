@@ -1,0 +1,20 @@
+name: Chart
+
+on:
+  pull_request:
+    paths:
+      - 'charts/**'
+      - '.github/workflows/chart.yml'
+
+jobs:
+  lint-and-render:
+    name: Lint and render chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+      - name: Lint
+        run: helm lint ./charts/metal-onboarding-operator
+      - name: Render
+        run: helm template metal-onboarding-operator ./charts/metal-onboarding-operator --set netbox.url=https://netbox.example
