@@ -92,7 +92,7 @@ func main() {
 	flag.StringVar(&netboxURL, "netbox-url", "",
 		"Base URL of the NetBox API.")
 	flag.StringVar(&netboxTokenFile, "netbox-token-file", "",
-		"Path to a file containing the NetBox API token.")
+		"Path to a file containing the NetBox API token. Optional; omit for unauthenticated read access.")
 	flag.StringVar(&clusterName, "cluster-name", "",
 		"Name of this cluster, used to gate onboarding to servers that belong here.")
 	flag.StringVar(&labelMapFile, "label-map-file", "",
@@ -106,9 +106,9 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	if netboxURL == "" || netboxTokenFile == "" {
+	if netboxURL == "" {
 		setupLog.Error(
-			fmt.Errorf("--netbox-url and --netbox-token-file are required"),
+			fmt.Errorf("--netbox-url is required"),
 			"invalid configuration",
 		)
 		os.Exit(1)

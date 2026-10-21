@@ -212,6 +212,9 @@ func (p *Provider) resolveRemoteboardHostname(ctx context.Context, token string,
 // --- low-level HTTP helpers ---
 
 func (p *Provider) readToken() (string, error) {
+	if p.tokenFile == "" {
+		return "", nil
+	}
 	// If the tokenFile field contains no path separator (used in tests), treat it as the literal token.
 	if !strings.ContainsAny(p.tokenFile, "/\\") {
 		return p.tokenFile, nil
@@ -246,7 +249,9 @@ func (p *Provider) getRaw(ctx context.Context, token, path string, query url.Val
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", p.authHeader(token))
+	if token != "" {
+		req.Header.Set("Authorization", p.authHeader(token))
+	}
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {

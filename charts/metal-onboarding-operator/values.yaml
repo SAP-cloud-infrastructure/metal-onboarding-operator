@@ -8,7 +8,8 @@ image:
 # Namespace to watch for DHCPLease CRs (defaults to the operator's own namespace when empty)
 dhcpLeaseNamespace: ""
 
-# NetBox settings — required
+# NetBox settings — url is required. A token is optional: NetBox read access is
+# unauthenticated, so leave tokenSecret.name empty unless your instance requires auth.
 netbox:
   url: ""
   tokenSecret:
