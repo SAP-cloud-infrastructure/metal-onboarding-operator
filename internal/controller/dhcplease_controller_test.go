@@ -69,13 +69,12 @@ func fakeRedfishServer(managerType string) *httptest.Server {
 
 var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 	const (
-		ns     = "default"
 		testIP = "10.0.0.1"
 	)
 
 	newLease := func(name, mac string) *dhcpshim.DHCPLease {
 		return &dhcpshim.DHCPLease{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			ObjectMeta: metav1.ObjectMeta{Name: name},
 			Spec:       dhcpshim.DHCPLeaseSpec{MACAddress: mac, IP: testIP},
 		}
 	}
@@ -92,7 +91,7 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 		r := &DHCPLeaseController{Client: cl, Scheme: s, InventoryProvider: inv}
 
 		_, err := r.Reconcile(context.Background(), ctrl.Request{
-			NamespacedName: types.NamespacedName{Name: "lease-2", Namespace: ns},
+			NamespacedName: types.NamespacedName{Name: "lease-2"},
 		})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -110,7 +109,7 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 		r := &DHCPLeaseController{Client: cl, Scheme: s, InventoryProvider: inv}
 
 		result, err := r.Reconcile(context.Background(), ctrl.Request{
-			NamespacedName: types.NamespacedName{Name: "lease-3", Namespace: ns},
+			NamespacedName: types.NamespacedName{Name: "lease-3"},
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
@@ -135,7 +134,7 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 		}
 
 		_, err := r.Reconcile(context.Background(), ctrl.Request{
-			NamespacedName: types.NamespacedName{Name: "lease-4", Namespace: ns},
+			NamespacedName: types.NamespacedName{Name: "lease-4"},
 		})
 		Expect(err).To(HaveOccurred())
 	})
@@ -148,7 +147,7 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 		r := &DHCPLeaseController{Client: cl, Scheme: s, InventoryProvider: inv}
 
 		_, err := r.Reconcile(context.Background(), ctrl.Request{
-			NamespacedName: types.NamespacedName{Name: "lease-empty", Namespace: ns},
+			NamespacedName: types.NamespacedName{Name: "lease-empty"},
 		})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -160,7 +159,6 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 
 var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 	const (
-		ns         = "default"
 		testMAC    = "aa:bb:cc:dd:ee:ff"
 		testIP     = "10.0.0.1"
 		serverName = "rabc12-bb01"
@@ -177,8 +175,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 	newLease := func(name string) *dhcpshim.DHCPLease {
 		return &dhcpshim.DHCPLease{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("%s-%d", name, time.Now().UnixNano()),
-				Namespace: ns,
+				Name: fmt.Sprintf("%s-%d", name, time.Now().UnixNano()),
 			},
 			Spec: dhcpshim.DHCPLeaseSpec{MACAddress: testMAC, IP: testIP},
 		}

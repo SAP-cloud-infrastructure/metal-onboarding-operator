@@ -5,10 +5,8 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
-# Namespace to watch for DHCPLease CRs (defaults to the operator's own namespace when empty)
-dhcpLeaseNamespace: ""
-
-# NetBox settings — required
+# NetBox settings — url is required. A token is optional: NetBox read access is
+# unauthenticated, so leave tokenSecret.name empty unless your instance requires auth.
 netbox:
   url: ""
   tokenSecret:
@@ -32,3 +30,18 @@ resources:
   limits:
     cpu: 500m
     memory: 256Mi
+
+# labelMap maps Kubernetes label keys to dot-separated NetBox device JSON paths.
+# The entries below mirror the hardcoded defaults already applied by the operator.
+# Add extra entries here for any additional NetBox fields you want as labels.
+# Note: kubernetes.metal.cloud.sap/nodename and /bb are derived by splitting the
+# device name on "-" and cannot be expressed as JSON paths.
+labelMap:
+  topology.kubernetes.io/region: site.region.slug
+  topology.kubernetes.io/zone: site.slug
+  kubernetes.metal.cloud.sap/cluster: cluster.name
+  kubernetes.metal.cloud.sap/cluster-type: cluster.type.slug
+  kubernetes.metal.cloud.sap/name: name
+  kubernetes.metal.cloud.sap/type: device_type.slug
+  kubernetes.metal.cloud.sap/role: device_role.slug
+  kubernetes.metal.cloud.sap/platform: platform.slug

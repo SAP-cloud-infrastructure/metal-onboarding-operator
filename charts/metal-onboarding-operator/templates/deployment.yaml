@@ -22,23 +22,34 @@ spec:
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         args:
         - --netbox-url={{ required "netbox.url is required" .Values.netbox.url }}
+        {{- if .Values.netbox.tokenSecret.name }}
         - --netbox-token-file=/var/run/secrets/netbox/{{ .Values.netbox.tokenSecret.key }}
-        {{- if .Values.dhcpLeaseNamespace }}
-        - --dhcp-lease-namespace={{ .Values.dhcpLeaseNamespace }}
         {{- end }}
         {{- if .Values.clusterName }}
         - --cluster-name={{ .Values.clusterName }}
         {{- end }}
         - --leader-elect={{ .Values.leaderElect }}
+        {{- if .Values.labelMap }}
+        - --label-map-file=/etc/moo/label-map.yaml
+        {{- end }}
         env:
         - name: POD_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        {{- if or .Values.netbox.tokenSecret.name .Values.labelMap }}
         volumeMounts:
+        {{- if .Values.netbox.tokenSecret.name }}
         - name: netbox-token
           mountPath: /var/run/secrets/netbox
           readOnly: true
+        {{- end }}
+        {{- if .Values.labelMap }}
+        - name: label-map
+          mountPath: /etc/moo
+          readOnly: true
+        {{- end }}
+        {{- end }}
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
         livenessProbe:
@@ -53,11 +64,20 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 10
+      {{- if or .Values.netbox.tokenSecret.name .Values.labelMap }}
       volumes:
+      {{- if .Values.netbox.tokenSecret.name }}
       - name: netbox-token
         secret:
-          secretName: {{ required "netbox.tokenSecret.name is required" .Values.netbox.tokenSecret.name }}
+          secretName: {{ .Values.netbox.tokenSecret.name }}
           items:
           - key: {{ .Values.netbox.tokenSecret.key }}
             path: {{ .Values.netbox.tokenSecret.key }}
+      {{- end }}
+      {{- if .Values.labelMap }}
+      - name: label-map
+        configMap:
+          name: metal-onboarding-operator-label-map
+      {{- end }}
+      {{- end }}
       terminationGracePeriodSeconds: 10
