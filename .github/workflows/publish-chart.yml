@@ -1,0 +1,82 @@
+# SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: MIT
+
+name: Release Helm Chart
+
+on:
+  release:
+    types:
+      - published
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+    types: [labeled, opened, synchronize, reopened]
+
+jobs:
+  helm-chart:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ok-to-charts')) ||
+      (github.event_name == 'release' && github.event.action == 'published')
+    steps:
+      - name: Lowercase repository owner
+        id: owner
+        run: echo "value=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.16.2
+
+      - name: Determine chart version
+        id: chart_version
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            CHART_VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            LATEST_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || echo "v0.0.0")
+            VERSION="${LATEST_TAG#v}"
+            BASE_VERSION="${VERSION%%-*}"
+            BASE_VERSION="${BASE_VERSION%%+*}"
+            MAJOR=$(echo $BASE_VERSION | cut -d. -f1)
+            MINOR=$(echo $BASE_VERSION | cut -d. -f2)
+            PATCH=$(echo $BASE_VERSION | cut -d. -f3)
+            NEXT_PATCH=$((PATCH + 1))
+            TIMESTAMP=$(date -u +%Y%m%d%H%M%S)
+            SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+            CHART_VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}-${TIMESTAMP}-${SHORT_SHA}"
+          fi
+          echo "version=$CHART_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Package Helm chart
+        run: |
+          helm package charts/metal-onboarding-operator --version ${{ steps.chart_version.outputs.version }}
+
+      - name: Log in to GitHub Container Registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push Helm chart to GHCR
+        run: |
+          helm push metal-onboarding-operator-${{ steps.chart_version.outputs.version }}.tgz oci://ghcr.io/${{ steps.owner.outputs.value }}/charts
