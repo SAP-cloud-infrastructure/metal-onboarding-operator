@@ -1,0 +1,92 @@
+# SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: MIT
+
+name: Build and publish Docker image
+
+env:
+  platforms: linux/amd64,linux/arm64
+
+on:
+  release:
+    types:
+      - published
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+    types: [labeled, unlabeled, opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-docker:
+    name: Build and publish Docker image
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ok-to-image')) ||
+      (github.event_name == 'release' && github.event.action == 'published')
+    runs-on: ubuntu-latest
+    steps:
+    - name: Lowercase repository owner
+      id: owner
+      run: echo "value=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+    - name: Check out repository
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+    - name: Collect metadata
+      uses: docker/metadata-action@v6
+      id: meta
+      with:
+        images: |
+          ghcr.io/${{ steps.owner.outputs.value }}/metal-onboarding-operator
+        tags: |
+          type=semver,pattern={{version}}
+          type=schedule
+          type=ref,event=branch
+          type=ref,event=tag
+          type=ref,event=pr
+          type=sha
+        flavor: |
+          latest=${{ github.ref == 'refs/heads/main' }}
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v4
+      with:
+        image: tonistiigi/binfmt:latest
+        platforms: ${{ env.platforms }}
+    - name: Set up Docker Buildx context
+      run: |
+        docker context create builders
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+      timeout-minutes: 5
+      with:
+        version: latest
+        endpoint: builders
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v7
+      timeout-minutes: 15
+      with:
+        context: .
+        platforms: ${{ env.platforms }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: |
+          ${{ steps.meta.outputs.labels }}
+          source_repository=${{ github.server_url }}/${{ github.repository }}
+        push: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ok-to-publish') }}
