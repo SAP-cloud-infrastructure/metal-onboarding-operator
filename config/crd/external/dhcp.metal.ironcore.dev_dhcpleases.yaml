@@ -12,7 +12,7 @@ spec:
     listKind: DHCPLeaseList
     plural: dhcpleases
     singular: dhcplease
-  scope: Namespaced
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.macAddress
@@ -30,6 +30,10 @@ spec:
       type: string
     - jsonPath: .spec.gateway
       name: Gateway
+      type: string
+    - jsonPath: .metadata.annotations['dhcp\.metal\.ironcore\.dev/vendor']
+      name: Vendor
+      priority: 1
       type: string
     name: v1alpha1
     schema:
@@ -91,4 +95,3 @@ spec:
     served: true
     storage: true
     subresources: {}
-
