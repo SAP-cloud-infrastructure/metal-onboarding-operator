@@ -63,7 +63,6 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
-	var dhcpLeaseNamespace string
 	var netboxURL string
 	var netboxTokenFile string
 	var clusterName string
@@ -87,8 +86,6 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	flag.StringVar(&dhcpLeaseNamespace, "dhcp-lease-namespace", "",
-		"Namespace to watch for DHCPLease CRs. Defaults to the operator's namespace.")
 	flag.StringVar(&netboxURL, "netbox-url", "",
 		"Base URL of the NetBox API.")
 	flag.StringVar(&netboxTokenFile, "netbox-token-file", "",
@@ -204,7 +201,6 @@ func main() {
 	}
 
 	setupLog.Info("starting manager",
-		"dhcp-lease-namespace", dhcpLeaseNamespace,
 		"cluster-name", clusterName,
 		"leader-elect", enableLeaderElection,
 	)

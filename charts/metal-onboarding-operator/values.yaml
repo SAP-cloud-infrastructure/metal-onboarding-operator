@@ -5,9 +5,6 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
-# Namespace to watch for DHCPLease CRs (defaults to the operator's own namespace when empty)
-dhcpLeaseNamespace: ""
-
 # NetBox settings — url is required. A token is optional: NetBox read access is
 # unauthenticated, so leave tokenSecret.name empty unless your instance requires auth.
 netbox:

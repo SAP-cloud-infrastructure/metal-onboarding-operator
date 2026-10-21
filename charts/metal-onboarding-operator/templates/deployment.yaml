@@ -25,9 +25,6 @@ spec:
         {{- if .Values.netbox.tokenSecret.name }}
         - --netbox-token-file=/var/run/secrets/netbox/{{ .Values.netbox.tokenSecret.key }}
         {{- end }}
-        {{- if .Values.dhcpLeaseNamespace }}
-        - --dhcp-lease-namespace={{ .Values.dhcpLeaseNamespace }}
-        {{- end }}
         {{- if .Values.clusterName }}
         - --cluster-name={{ .Values.clusterName }}
         {{- end }}
