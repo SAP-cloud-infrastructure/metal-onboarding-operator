@@ -23,6 +23,20 @@ serviceAccount:
   create: true
   name: ""
 
+# podLabels are added to the pod template labels. Useful for network policy selectors.
+podLabels: {}
+
+# remoteAPIServer enables cross-cluster operation: when set to a <host>:<port>, the operator
+# mounts a kubeconfig that points to that API server and sets KUBECONFIG accordingly.
+# A ConfigMap named <release-name>-remote-kubeconfig is created with the kubeconfig.
+# The token/CA must be injected externally (e.g. via Gardener token-requestor).
+remoteAPIServer: ""
+
+rbac:
+  # create controls whether ClusterRole and ClusterRoleBinding are created.
+  # Set to false when RBAC is managed externally (e.g. via Gardener ManagedResource).
+  create: true
+
 resources:
   requests:
     cpu: 10m

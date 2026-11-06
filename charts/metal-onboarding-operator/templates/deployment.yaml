@@ -14,6 +14,9 @@ spec:
     metadata:
       labels:
         {{- include "metal-onboarding-operator.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "metal-onboarding-operator.serviceAccountName" . }}
       containers:
@@ -33,11 +36,15 @@ spec:
         - --label-map-file=/etc/moo/label-map.yaml
         {{- end }}
         env:
+        {{- if .Values.remoteAPIServer }}
+        - name: KUBECONFIG
+          value: /var/run/remote-kubeconfig/kubeconfig
+        {{- end }}
         - name: POD_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        {{- if or .Values.netbox.tokenSecret.name .Values.labelMap }}
+        {{- if or .Values.netbox.tokenSecret.name .Values.labelMap .Values.remoteAPIServer }}
         volumeMounts:
         {{- if .Values.netbox.tokenSecret.name }}
         - name: netbox-token
@@ -48,6 +55,12 @@ spec:
         - name: label-map
           mountPath: /etc/moo
           readOnly: true
+        {{- end }}
+        {{- if .Values.remoteAPIServer }}
+        - name: remote-kubeconfig
+          mountPath: /var/run/remote-kubeconfig
+        - name: remote-serviceaccount
+          mountPath: /var/run/secrets/kubernetes.io/remote-serviceaccount
         {{- end }}
         {{- end }}
         resources:
@@ -64,7 +77,7 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 10
-      {{- if or .Values.netbox.tokenSecret.name .Values.labelMap }}
+      {{- if or .Values.netbox.tokenSecret.name .Values.labelMap .Values.remoteAPIServer }}
       volumes:
       {{- if .Values.netbox.tokenSecret.name }}
       - name: netbox-token
@@ -78,6 +91,19 @@ spec:
       - name: label-map
         configMap:
           name: metal-onboarding-operator-label-map
+      {{- end }}
+      {{- if .Values.remoteAPIServer }}
+      - name: remote-kubeconfig
+        configMap:
+          name: {{ .Release.Name }}-remote-kubeconfig
+      - name: remote-serviceaccount
+        secret:
+          secretName: {{ .Release.Name }}-remote-kubeconfig
+          items:
+          - key: token
+            path: token
+          - key: bundle.crt
+            path: ca.crt
       {{- end }}
       {{- end }}
       terminationGracePeriodSeconds: 10
