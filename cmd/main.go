@@ -39,6 +39,7 @@ import (
 
 	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/controller"
 	dhcpshim "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
+	oobsubnet "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/oobsubnet"
 	netboxprovider "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/provider/netbox"
 	// +kubebuilder:scaffold:imports
 )
@@ -67,6 +68,7 @@ func main() {
 	var netboxTokenFile string
 	var clusterName string
 	var labelMapFile string
+	var oobSubnetConfigFile string
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -94,6 +96,10 @@ func main() {
 		"Name of this cluster, used to gate onboarding to servers that belong here.")
 	flag.StringVar(&labelMapFile, "label-map-file", "",
 		"Path to a YAML file mapping Kubernetes label keys to NetBox device JSON paths.")
+	flag.StringVar(&oobSubnetConfigFile, "oob-subnet-config-file", "",
+		"Path to a YAML file mapping CIDR strings to static OOBSubnet fields "+
+			"(gateway, bootURL, rangeStart, rangeEnd, leaseTime). "+
+			"When omitted, OOBSubnet creation is disabled.")
 
 	opts := zap.Options{
 		Development: true,
@@ -120,6 +126,19 @@ func main() {
 		}
 		if err := yaml.Unmarshal(raw, &labelMap); err != nil {
 			setupLog.Error(err, "unable to parse label-map-file", "path", labelMapFile)
+			os.Exit(1)
+		}
+	}
+
+	var oobSubnetConfig oobsubnet.ConfigMap
+	if oobSubnetConfigFile != "" {
+		raw, err := os.ReadFile(oobSubnetConfigFile)
+		if err != nil {
+			setupLog.Error(err, "unable to read oob-subnet-config-file", "path", oobSubnetConfigFile)
+			os.Exit(1)
+		}
+		if err := yaml.Unmarshal(raw, &oobSubnetConfig); err != nil {
+			setupLog.Error(err, "unable to parse oob-subnet-config-file", "path", oobSubnetConfigFile)
 			os.Exit(1)
 		}
 	}
@@ -181,11 +200,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.DHCPLeaseController{
+	nbProvider := netboxprovider.New(netboxURL, netboxTokenFile, clusterName, labelMap)
+	rec := &controller.DHCPLeaseController{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
-		InventoryProvider: netboxprovider.New(netboxURL, netboxTokenFile, clusterName, labelMap),
-	}).SetupWithManager(mgr); err != nil {
+		InventoryProvider: nbProvider,
+		OOBSubnetConfig:   oobSubnetConfig,
+	}
+	if oobSubnetConfigFile != "" {
+		rec.SubnetProvider = nbProvider
+	}
+	if err := rec.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DHCPLease")
 		os.Exit(1)
 	}

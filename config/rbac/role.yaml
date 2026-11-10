@@ -13,6 +13,17 @@ rules:
   - list
   - watch
 - apiGroups:
+  - dhcp.metal.ironcore.dev
+  resources:
+  - oobsubnets
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - metal.ironcore.dev
   resources:
   - bmcs

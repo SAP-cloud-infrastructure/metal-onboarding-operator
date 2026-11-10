@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	dhcpshim "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
+	oobsubnet "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/oobsubnet"
 	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/provider"
 )
 
@@ -48,6 +49,16 @@ func (f *fakeInventory) LookupByMAC(_ context.Context, _ string) (*provider.Inve
 	return f.record, f.err
 }
 
+// fakeSubnetProvider is a trivial SubnetProvider used in unit tests.
+type fakeSubnetProvider struct {
+	cidr string
+	err  error
+}
+
+func (f *fakeSubnetProvider) LookupPrefixForIP(_ context.Context, _ string) (string, error) {
+	return f.cidr, f.err
+}
+
 func newFakeScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	_ = dhcpshim.AddToScheme(s)
@@ -55,13 +66,13 @@ func newFakeScheme() *runtime.Scheme {
 	return s
 }
 
-func fakeRedfishServer(managerType string) *httptest.Server {
+func fakeRedfishServer() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/redfish/v1" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		body, _ := json.Marshal(map[string]string{"ManagerType": managerType})
+		body, _ := json.Marshal(map[string]string{"ManagerType": "iDRAC"})
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 	}))
@@ -155,6 +166,158 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 		Expect(cl.List(context.Background(), bmcList)).To(Succeed())
 		Expect(bmcList.Items).To(BeEmpty())
 	})
+
+	It("creates OOBSubnet with CIDR and static config fields", func() {
+		redfishSrv := fakeRedfishServer()
+		DeferCleanup(redfishSrv.Close)
+
+		inv := &fakeInventory{record: &provider.InventoryRecord{
+			ClusterGate: provider.ClusterGateBelongs,
+			ServerName:  "oob-server",
+			OOBIP:       testIP,
+			Labels:      map[string]string{},
+		}}
+		subnetProv := &fakeSubnetProvider{cidr: "10.0.0.0/24"}
+		cfg := oobsubnet.ConfigMap{
+			"10.0.0.0/24": {Gateway: "10.0.0.1", BootURL: "http://boot.example.com/ipxe"},
+		}
+
+		lease := newLease("lease-oob", "aa:bb:cc:dd:ee:01")
+		s := newFakeScheme()
+		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
+		r := &DHCPLeaseController{
+			Client:            cl,
+			Scheme:            s,
+			InventoryProvider: inv,
+			SubnetProvider:    subnetProv,
+			OOBSubnetConfig:   cfg,
+			RedfishBaseURL:    redfishSrv.URL,
+		}
+
+		_, err := r.Reconcile(context.Background(), ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: "lease-oob"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		subnet := &dhcpshim.OOBSubnet{}
+		Expect(cl.Get(context.Background(), types.NamespacedName{Name: "10.0.0.0-24"}, subnet)).To(Succeed())
+		Expect(subnet.Spec.CIDR).To(Equal("10.0.0.0/24"))
+		Expect(subnet.Spec.Gateway).To(Equal("10.0.0.1"))
+		Expect(subnet.Spec.BootURL).To(Equal("http://boot.example.com/ipxe"))
+	})
+
+	It("does not create OOBSubnet when SubnetProvider is nil", func() {
+		redfishSrv := fakeRedfishServer()
+		DeferCleanup(redfishSrv.Close)
+
+		inv := &fakeInventory{record: &provider.InventoryRecord{
+			ClusterGate: provider.ClusterGateBelongs,
+			ServerName:  "no-subnet-server",
+			OOBIP:       testIP,
+			Labels:      map[string]string{},
+		}}
+
+		lease := newLease("lease-nosubnet", "aa:bb:cc:dd:ee:02")
+		s := newFakeScheme()
+		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
+		r := &DHCPLeaseController{
+			Client:            cl,
+			Scheme:            s,
+			InventoryProvider: inv,
+			SubnetProvider:    nil, // feature disabled
+			RedfishBaseURL:    redfishSrv.URL,
+		}
+
+		_, err := r.Reconcile(context.Background(), ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: "lease-nosubnet"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		subnetList := &dhcpshim.OOBSubnetList{}
+		Expect(cl.List(context.Background(), subnetList)).To(Succeed())
+		Expect(subnetList.Items).To(BeEmpty())
+	})
+
+	It("logs and continues when prefix not found in NetBox", func() {
+		redfishSrv := fakeRedfishServer()
+		DeferCleanup(redfishSrv.Close)
+
+		inv := &fakeInventory{record: &provider.InventoryRecord{
+			ClusterGate: provider.ClusterGateBelongs,
+			ServerName:  "prefix-notfound-server",
+			OOBIP:       testIP,
+			Labels:      map[string]string{},
+		}}
+		subnetProv := &fakeSubnetProvider{err: provider.ErrNotFound}
+
+		lease := newLease("lease-nopfx", "aa:bb:cc:dd:ee:03")
+		s := newFakeScheme()
+		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
+		r := &DHCPLeaseController{
+			Client:            cl,
+			Scheme:            s,
+			InventoryProvider: inv,
+			SubnetProvider:    subnetProv,
+			RedfishBaseURL:    redfishSrv.URL,
+		}
+
+		_, err := r.Reconcile(context.Background(), ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: "lease-nopfx"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// BMC should still be created despite missing prefix.
+		bmcList := &metalv1alpha1.BMCList{}
+		Expect(cl.List(context.Background(), bmcList)).To(Succeed())
+		Expect(bmcList.Items).To(HaveLen(1))
+
+		subnetList := &dhcpshim.OOBSubnetList{}
+		Expect(cl.List(context.Background(), subnetList)).To(Succeed())
+		Expect(subnetList.Items).To(BeEmpty())
+	})
+
+	It("patches OOBSubnet spec when it has changed", func() {
+		redfishSrv := fakeRedfishServer()
+		DeferCleanup(redfishSrv.Close)
+
+		const patchCIDR = "10.1.0.0/24"
+		inv := &fakeInventory{record: &provider.InventoryRecord{
+			ClusterGate: provider.ClusterGateBelongs,
+			ServerName:  "patch-server",
+			OOBIP:       testIP,
+			Labels:      map[string]string{},
+		}}
+		subnetProv := &fakeSubnetProvider{cidr: patchCIDR}
+		cfg := oobsubnet.ConfigMap{
+			patchCIDR: {Gateway: "10.1.0.254"},
+		}
+
+		// Pre-create an OOBSubnet with stale gateway.
+		existing := &dhcpshim.OOBSubnet{
+			ObjectMeta: metav1.ObjectMeta{Name: "10.1.0.0-24"},
+			Spec:       dhcpshim.OOBSubnetSpec{CIDR: patchCIDR, Gateway: "10.1.0.1"},
+		}
+		lease := newLease("lease-patch", "aa:bb:cc:dd:ee:04")
+		s := newFakeScheme()
+		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease, existing).Build()
+		r := &DHCPLeaseController{
+			Client:            cl,
+			Scheme:            s,
+			InventoryProvider: inv,
+			SubnetProvider:    subnetProv,
+			OOBSubnetConfig:   cfg,
+			RedfishBaseURL:    redfishSrv.URL,
+		}
+
+		_, err := r.Reconcile(context.Background(), ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: "lease-patch"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		updated := &dhcpshim.OOBSubnet{}
+		Expect(cl.Get(context.Background(), types.NamespacedName{Name: "10.1.0.0-24"}, updated)).To(Succeed())
+		Expect(updated.Spec.Gateway).To(Equal("10.1.0.254"))
+	})
 })
 
 var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
@@ -166,7 +329,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 
 	var redfishServer *httptest.Server
 	BeforeEach(func() {
-		redfishServer = fakeRedfishServer("iDRAC")
+		redfishServer = fakeRedfishServer()
 	})
 	AfterEach(func() {
 		redfishServer.Close()

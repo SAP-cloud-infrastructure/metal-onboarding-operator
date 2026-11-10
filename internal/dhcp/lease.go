@@ -29,6 +29,10 @@ type (
 	DHCPLease     = metaldhcpv1alpha1.DHCPLease
 	DHCPLeaseList = metaldhcpv1alpha1.DHCPLeaseList
 	DHCPLeaseSpec = metaldhcpv1alpha1.DHCPLeaseSpec
+
+	OOBSubnet     = metaldhcpv1alpha1.OOBSubnet
+	OOBSubnetList = metaldhcpv1alpha1.OOBSubnetList
+	OOBSubnetSpec = metaldhcpv1alpha1.OOBSubnetSpec
 )
 
 var AddToScheme = metaldhcpv1alpha1.AddToScheme

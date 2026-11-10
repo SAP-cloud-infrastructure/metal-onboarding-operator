@@ -69,3 +69,10 @@ type InventoryProvider interface {
 	// Returns a retriable error for transient failures (network errors, 5xx responses).
 	LookupByMAC(ctx context.Context, mac string) (*InventoryRecord, error)
 }
+
+// SubnetProvider resolves an IP address to the CIDR of the most-specific containing subnet.
+type SubnetProvider interface {
+	// LookupPrefixForIP returns the most-specific IPv4 prefix CIDR that contains ip.
+	// Returns ErrNotFound when no prefix matches.
+	LookupPrefixForIP(ctx context.Context, ip string) (cidr string, err error)
+}
