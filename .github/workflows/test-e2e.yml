@@ -1,7 +1,16 @@
 name: E2E Tests
 
 on:
-  workflow_dispatch: # disabled until repo is public
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
 
 jobs:
   test-e2e:
