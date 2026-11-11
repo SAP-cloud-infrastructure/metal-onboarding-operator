@@ -44,6 +44,18 @@ const (
 	testRegionSlug  = "eu-de-1"
 	testSiteSlug    = "qa-test"
 	testBMCHostname = "rabc12r.example.com"
+
+	keyCount      = "count"
+	keyResults    = "results"
+	keyDevice     = "device"
+	keyAddress    = "address"
+	keySite       = "site"
+	keyCluster    = "cluster"
+	keyDeviceType = "device_type"
+	keyDeviceRole = "device_role"
+	keyPlatform   = "platform"
+	keyRegion     = "region"
+	valBaremetal  = "baremetal"
 )
 
 var _ = Describe("NetBox Provider", func() {
@@ -60,18 +72,18 @@ var _ = Describe("NetBox Provider", func() {
 			w.Header().Set("Content-Type", "application/json")
 			if r.URL.Query().Get("mac_address") != "" {
 				_ = json.NewEncoder(w).Encode(map[string]any{
-					"count": 1,
-					"results": []any{
-						map[string]any{"id": 42, "name": "eth0", "device": map[string]any{"id": 7, "name": testDeviceName}},
+					keyCount: 1,
+					keyResults: []any{
+						map[string]any{"id": 42, "name": "eth0", keyDevice: map[string]any{"id": 7, "name": testDeviceName}},
 					},
 				})
 				return
 			}
 			// remoteboard lookup by device_id + name
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"count": 1,
-				"results": []any{
-					map[string]any{"id": 99, "name": "remoteboard", "device": map[string]any{"id": 7, "name": testDeviceName}},
+				keyCount: 1,
+				keyResults: []any{
+					map[string]any{"id": 99, "name": "remoteboard", keyDevice: map[string]any{"id": 7, "name": testDeviceName}},
 				},
 			})
 		})
@@ -79,18 +91,18 @@ var _ = Describe("NetBox Provider", func() {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id": 7, "name": testDeviceName,
-				"oob_ip":      map[string]any{"address": testOOBIP, "dns_name": ""},
-				"site":        map[string]any{"id": 3, "slug": testSiteSlug, "name": "Test Site"},
-				"cluster":     map[string]any{"id": 5, "name": testCluster, "type": map[string]any{"slug": "openstack"}},
-				"device_type": map[string]any{"slug": "r640"},
-				"device_role": map[string]any{"slug": "baremetal"},
-				"platform":    map[string]any{"slug": "ubuntu"},
+				"oob_ip":      map[string]any{keyAddress: testOOBIP, "dns_name": ""},
+				keySite:       map[string]any{"id": 3, "slug": testSiteSlug, "name": "Test Site"},
+				keyCluster:    map[string]any{"id": 5, "name": testCluster, "type": map[string]any{"slug": "openstack"}},
+				keyDeviceType: map[string]any{"slug": "r640"},
+				keyDeviceRole: map[string]any{"slug": valBaremetal},
+				keyPlatform:   map[string]any{"slug": "ubuntu"},
 			})
 		})
 		mux.HandleFunc("/api/dcim/sites/3/", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": 3, "slug": testSiteSlug, "region": map[string]any{"id": 1, "slug": testRegionSlug},
+				"id": 3, "slug": testSiteSlug, keyRegion: map[string]any{"id": 1, "slug": testRegionSlug},
 			})
 		})
 		mux.HandleFunc("/api/dcim/regions/1/", func(w http.ResponseWriter, _ *http.Request) {
@@ -100,9 +112,9 @@ var _ = Describe("NetBox Provider", func() {
 		mux.HandleFunc("/api/ipam/ip-addresses/", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"count": 1,
-				"results": []any{
-					map[string]any{"id": 55, "address": "192.168.1.100/24", "dns_name": testBMCHostname},
+				keyCount: 1,
+				keyResults: []any{
+					map[string]any{"id": 55, keyAddress: "192.168.1.100/24", "dns_name": testBMCHostname},
 				},
 			})
 		})
@@ -128,7 +140,7 @@ var _ = Describe("NetBox Provider", func() {
 		Expect(rec.Labels).To(HaveKeyWithValue("kubernetes.metal.cloud.sap/nodename", "rabc12"))
 		Expect(rec.Labels).To(HaveKeyWithValue("kubernetes.metal.cloud.sap/bb", "bb01"))
 		Expect(rec.Labels).To(HaveKeyWithValue("kubernetes.metal.cloud.sap/type", "r640"))
-		Expect(rec.Labels).To(HaveKeyWithValue("kubernetes.metal.cloud.sap/role", "baremetal"))
+		Expect(rec.Labels).To(HaveKeyWithValue("kubernetes.metal.cloud.sap/role", valBaremetal))
 		Expect(rec.Labels).To(HaveKeyWithValue("kubernetes.metal.cloud.sap/platform", "ubuntu"))
 	})
 
@@ -136,7 +148,7 @@ var _ = Describe("NetBox Provider", func() {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/api/dcim/interfaces/") {
 				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{"count": 0, "results": []any{}})
+				_ = json.NewEncoder(w).Encode(map[string]any{keyCount: 0, keyResults: []any{}})
 				return
 			}
 			w.WriteHeader(http.StatusInternalServerError)
@@ -167,31 +179,31 @@ var _ = Describe("NetBox Provider", func() {
 			w.Header().Set("Content-Type", "application/json")
 			if r.URL.Query().Get("mac_address") != "" {
 				_ = json.NewEncoder(w).Encode(map[string]any{
-					"count": 1,
-					"results": []any{
-						map[string]any{"id": 42, "name": "eth0", "device": map[string]any{"id": 7, "name": testDeviceName}},
+					keyCount: 1,
+					keyResults: []any{
+						map[string]any{"id": 42, "name": "eth0", keyDevice: map[string]any{"id": 7, "name": testDeviceName}},
 					},
 				})
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"count": 0, "results": []any{}})
+			_ = json.NewEncoder(w).Encode(map[string]any{keyCount: 0, keyResults: []any{}})
 		})
 		mux.HandleFunc("/api/dcim/devices/7/", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id": 7, "name": testDeviceName,
-				"oob_ip":      map[string]any{"address": testOOBIP, "dns_name": ""},
-				"site":        map[string]any{"id": 3, "slug": testSiteSlug},
-				"cluster":     map[string]any{"id": 8, "name": "other-cluster", "type": map[string]any{"slug": "openstack"}},
-				"device_type": map[string]any{"slug": "r640"},
-				"device_role": map[string]any{"slug": "baremetal"},
-				"platform":    map[string]any{"slug": "ubuntu"},
+				"oob_ip":      map[string]any{keyAddress: testOOBIP, "dns_name": ""},
+				keySite:       map[string]any{"id": 3, "slug": testSiteSlug},
+				keyCluster:    map[string]any{"id": 8, "name": "other-cluster", "type": map[string]any{"slug": "openstack"}},
+				keyDeviceType: map[string]any{"slug": "r640"},
+				keyDeviceRole: map[string]any{"slug": valBaremetal},
+				keyPlatform:   map[string]any{"slug": "ubuntu"},
 			})
 		})
 		mux.HandleFunc("/api/dcim/sites/3/", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": 3, "slug": testSiteSlug, "region": map[string]any{"id": 1, "slug": testRegionSlug},
+				"id": 3, "slug": testSiteSlug, keyRegion: map[string]any{"id": 1, "slug": testRegionSlug},
 			})
 		})
 		mux.HandleFunc("/api/dcim/regions/1/", func(w http.ResponseWriter, _ *http.Request) {
@@ -215,25 +227,25 @@ var _ = Describe("NetBox Provider", func() {
 			w.Header().Set("Content-Type", "application/json")
 			if r.URL.Query().Get("mac_address") != "" {
 				_ = json.NewEncoder(w).Encode(map[string]any{
-					"count": 1,
-					"results": []any{
-						map[string]any{"id": 42, "name": "eth0", "device": map[string]any{"id": 7, "name": testDeviceName}},
+					keyCount: 1,
+					keyResults: []any{
+						map[string]any{"id": 42, "name": "eth0", keyDevice: map[string]any{"id": 7, "name": testDeviceName}},
 					},
 				})
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"count": 0, "results": []any{}})
+			_ = json.NewEncoder(w).Encode(map[string]any{keyCount: 0, keyResults: []any{}})
 		})
 		mux.HandleFunc("/api/dcim/devices/7/", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id": 7, "name": testDeviceName,
-				"oob_ip":      map[string]any{"address": testOOBIP, "dns_name": ""},
-				"site":        map[string]any{"id": 3, "slug": testSiteSlug},
-				"cluster":     map[string]any{"id": 5, "name": testCluster, "type": map[string]any{"slug": "openstack"}},
-				"device_type": map[string]any{"slug": "r640"},
-				"device_role": map[string]any{"slug": "baremetal"},
-				"platform":    map[string]any{"slug": "ubuntu"},
+				"oob_ip":      map[string]any{keyAddress: testOOBIP, "dns_name": ""},
+				keySite:       map[string]any{"id": 3, "slug": testSiteSlug},
+				keyCluster:    map[string]any{"id": 5, "name": testCluster, "type": map[string]any{"slug": "openstack"}},
+				keyDeviceType: map[string]any{"slug": "r640"},
+				keyDeviceRole: map[string]any{"slug": valBaremetal},
+				keyPlatform:   map[string]any{"slug": "ubuntu"},
 				"custom_fields": map[string]any{
 					"rack": "ra-bc-12",
 				},
@@ -242,7 +254,7 @@ var _ = Describe("NetBox Provider", func() {
 		mux.HandleFunc("/api/dcim/sites/3/", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": 3, "slug": testSiteSlug, "region": map[string]any{"id": 1, "slug": testRegionSlug},
+				"id": 3, "slug": testSiteSlug, keyRegion: map[string]any{"id": 1, "slug": testRegionSlug},
 			})
 		})
 		mux.HandleFunc("/api/dcim/regions/1/", func(w http.ResponseWriter, _ *http.Request) {
