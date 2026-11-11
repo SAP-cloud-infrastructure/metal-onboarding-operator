@@ -35,11 +35,10 @@ spec:
         {{- if .Values.labelMap }}
         - --label-map-file=/etc/moo/label-map.yaml
         {{- end }}
-        env:
         {{- if .Values.remoteAPIServer }}
-        - name: KUBECONFIG
-          value: /var/run/remote-kubeconfig/kubeconfig
+        - --kubeconfig=/var/run/remote-kubeconfig/kubeconfig
         {{- end }}
+        env:
         - name: POD_NAMESPACE
           valueFrom:
             fieldRef:

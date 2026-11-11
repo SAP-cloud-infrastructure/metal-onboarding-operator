@@ -29,7 +29,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -67,6 +70,7 @@ func main() {
 	var netboxTokenFile string
 	var clusterName string
 	var labelMapFile string
+	var kubeconfigPath string
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -94,6 +98,9 @@ func main() {
 		"Name of this cluster, used to gate onboarding to servers that belong here.")
 	flag.StringVar(&labelMapFile, "label-map-file", "",
 		"Path to a YAML file mapping Kubernetes label keys to NetBox device JSON paths.")
+	flag.StringVar(&kubeconfigPath, "kubeconfig", "",
+		"Path to a kubeconfig for the target cluster. When set, the operator reconciles against that cluster "+
+			"while leader election and health probes run against the local in-cluster config.")
 
 	opts := zap.Options{
 		Development: true,
@@ -168,7 +175,28 @@ func main() {
 		metricsServerOptions.KeyName = metricsCertKey
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	// Always use in-cluster config for the manager so that leader election and
+	// health probes run against the seed cluster, not the remote target cluster.
+	localCfg, err := rest.InClusterConfig()
+	if err != nil {
+		setupLog.Error(err, "unable to get in-cluster config")
+		os.Exit(1)
+	}
+
+	// When --kubeconfig is set, the controller reconciles against the remote cluster.
+	// Otherwise it reconciles against the local (seed) cluster.
+	var targetCfg *rest.Config
+	if kubeconfigPath != "" {
+		targetCfg, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		if err != nil {
+			setupLog.Error(err, "unable to load kubeconfig", "path", kubeconfigPath)
+			os.Exit(1)
+		}
+	} else {
+		targetCfg = localCfg
+	}
+
+	mgr, err := ctrl.NewManager(localCfg, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
@@ -181,8 +209,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	targetClient, err := client.New(targetCfg, client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Error(err, "unable to create target cluster client")
+		os.Exit(1)
+	}
+
 	if err := (&controller.DHCPLeaseController{
-		Client:            mgr.GetClient(),
+		Client:            targetClient,
 		Scheme:            mgr.GetScheme(),
 		InventoryProvider: netboxprovider.New(netboxURL, netboxTokenFile, clusterName, labelMap),
 	}).SetupWithManager(mgr); err != nil {
