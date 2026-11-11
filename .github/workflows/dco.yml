@@ -1,0 +1,14 @@
+name: DCO
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  dco:
+    name: DCO Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check DCO
+        uses: github/dco@v1

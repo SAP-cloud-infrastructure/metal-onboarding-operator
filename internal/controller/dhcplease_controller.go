@@ -35,6 +35,7 @@ import (
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 
 	dhcpshim "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
+	oobsubnet "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/oobsubnet"
 	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/provider"
 )
 
@@ -52,6 +53,11 @@ type DHCPLeaseController struct {
 	client.Client
 	Scheme            *runtime.Scheme
 	InventoryProvider provider.InventoryProvider
+	// SubnetProvider, when non-nil, enables OOBSubnet CR creation as a side-effect of
+	// DHCPLease reconciliation. When nil, OOBSubnet creation is disabled.
+	SubnetProvider provider.SubnetProvider
+	// OOBSubnetConfig holds per-CIDR static configuration merged into OOBSubnet specs.
+	OOBSubnetConfig oobsubnet.ConfigMap
 	// RedfishBaseURL overrides the Redfish endpoint base URL, used in tests.
 	// When empty, the controller uses http://<lease.Spec.IP> as the base URL.
 	RedfishBaseURL string
@@ -59,6 +65,7 @@ type DHCPLeaseController struct {
 
 // +kubebuilder:rbac:groups=dhcp.metal.ironcore.dev,resources=dhcpleases,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=dhcp.metal.ironcore.dev,resources=oobsubnets,verbs=get;list;watch;create;update;patch
 
 // Reconcile drives the full onboarding workflow for a single DHCPLease in one pass.
 // The reconciler is fully idempotent: if a BMC CR already exists for the server, the
@@ -165,6 +172,11 @@ func (r *DHCPLeaseController) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	log.Info("BMC ready", "name", rec.ServerName, "managerType", managerType)
+
+	if err := r.ensureOOBSubnet(ctx, ip); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -212,4 +224,80 @@ func (r *DHCPLeaseController) SetupWithManager(mgr ctrl.Manager) error {
 		For(&dhcpshim.DHCPLease{}).
 		Named("dhcplease").
 		Complete(r)
+}
+
+// ensureOOBSubnet creates or updates the OOBSubnet CR for the subnet containing ip.
+// It is a no-op when SubnetProvider is nil. If the prefix is not found in NetBox
+// (ErrNotFound), the error is logged and nil is returned so onboarding continues.
+func (r *DHCPLeaseController) ensureOOBSubnet(ctx context.Context, ip string) error {
+	if r.SubnetProvider == nil {
+		return nil
+	}
+	log := logf.FromContext(ctx)
+
+	cidr, err := r.SubnetProvider.LookupPrefixForIP(ctx, ip)
+	if err != nil {
+		if err == provider.ErrNotFound {
+			log.Info("no prefix found for lease IP; skipping OOBSubnet", "ip", ip)
+			return nil
+		}
+		return fmt.Errorf("lookup prefix for IP %s: %w", ip, err)
+	}
+
+	name := oobsubnet.NameFromCIDR(cidr)
+	cfg := r.OOBSubnetConfig[cidr]
+
+	existing := &dhcpshim.OOBSubnet{}
+	err = r.Get(ctx, types.NamespacedName{Name: name}, existing)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("get OOBSubnet %s: %w", name, err)
+	}
+
+	desired := dhcpshim.OOBSubnetSpec{
+		CIDR:       cidr,
+		Gateway:    cfg.Gateway,
+		BootURL:    cfg.BootURL,
+		RangeStart: cfg.RangeStart,
+		RangeEnd:   cfg.RangeEnd,
+		LeaseTime:  cfg.LeaseTime,
+	}
+
+	if apierrors.IsNotFound(err) {
+		obj := &dhcpshim.OOBSubnet{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec:       desired,
+		}
+		if err := r.Create(ctx, obj); err != nil {
+			return fmt.Errorf("create OOBSubnet %s: %w", name, err)
+		}
+		log.Info("OOBSubnet created", "name", name, "cidr", cidr)
+		return nil
+	}
+
+	if existing.Spec.CIDR == desired.CIDR &&
+		existing.Spec.Gateway == desired.Gateway &&
+		existing.Spec.BootURL == desired.BootURL &&
+		existing.Spec.RangeStart == desired.RangeStart &&
+		existing.Spec.RangeEnd == desired.RangeEnd &&
+		leaseTimeEqual(existing.Spec.LeaseTime, desired.LeaseTime) {
+		return nil
+	}
+
+	patch := client.MergeFrom(existing.DeepCopy())
+	existing.Spec = desired
+	if err := r.Patch(ctx, existing, patch); err != nil {
+		return fmt.Errorf("patch OOBSubnet %s: %w", name, err)
+	}
+	log.Info("OOBSubnet updated", "name", name, "cidr", cidr)
+	return nil
+}
+
+func leaseTimeEqual(a, b *metav1.Duration) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Duration == b.Duration
 }

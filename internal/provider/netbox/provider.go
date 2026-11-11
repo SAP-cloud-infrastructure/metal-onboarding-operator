@@ -371,6 +371,11 @@ type nbListResult[T any] struct {
 	Results []T `json:"results"`
 }
 
+type nbPrefix struct {
+	ID     int    `json:"id"`
+	Prefix string `json:"prefix"` // e.g. "10.0.1.0/24"
+}
+
 // --- API call wrappers ---
 
 func (p *Provider) listInterfaces(ctx context.Context, token string, q url.Values) ([]nbInterface, error) {
@@ -430,5 +435,56 @@ func parseIPFromCIDR(cidr string) (string, error) {
 	return ip.String(), nil
 }
 
+func (p *Provider) listPrefixes(ctx context.Context, token string, q url.Values) ([]nbPrefix, error) {
+	var page nbListResult[nbPrefix]
+	if err := p.get(ctx, token, "/api/ipam/prefixes/", q, &page); err != nil {
+		return nil, err
+	}
+	return page.Results, nil
+}
+
+// LookupPrefixForIP calls GET /api/ipam/prefixes/?contains=<ip>&family=4 and returns
+// the most-specific (longest prefix-length) matching CIDR. Returns ErrNotFound when
+// no prefix contains the IP.
+func (p *Provider) LookupPrefixForIP(ctx context.Context, ip string) (string, error) {
+	token, err := p.readToken()
+	if err != nil {
+		return "", fmt.Errorf("netbox: read token: %w", err)
+	}
+
+	prefixes, err := p.listPrefixes(ctx, token, url.Values{
+		"contains": {ip},
+		"family":   {"4"},
+	})
+	if err != nil {
+		return "", fmt.Errorf("netbox: list prefixes for %s: %w", ip, err)
+	}
+	if len(prefixes) == 0 {
+		return "", provider.ErrNotFound
+	}
+
+	best := prefixes[0]
+	bestLen := prefixLen(best.Prefix)
+	for _, pf := range prefixes[1:] {
+		if l := prefixLen(pf.Prefix); l > bestLen {
+			best, bestLen = pf, l
+		}
+	}
+	return best.Prefix, nil
+}
+
+// prefixLen returns the prefix length of a CIDR string, or -1 on parse error.
+func prefixLen(cidr string) int {
+	_, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return -1
+	}
+	ones, _ := ipNet.Mask.Size()
+	return ones
+}
+
 // compile-time check that Provider satisfies the interface.
 var _ provider.InventoryProvider = (*Provider)(nil)
+
+// compile-time check that Provider satisfies the SubnetProvider interface.
+var _ provider.SubnetProvider = (*Provider)(nil)
