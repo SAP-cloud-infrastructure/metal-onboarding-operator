@@ -1,0 +1,51 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-redfish
+  namespace: default
+  labels:
+    app: fake-redfish
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fake-redfish
+  template:
+    metadata:
+      labels:
+        app: fake-redfish
+    spec:
+      containers:
+      - name: fake-redfish
+        image: localhost:5001/fake-redfish
+        ports:
+        - containerPort: 443
+          name: https
+        env:
+        - name: REDFISH_SERVICE_TAG
+          value: "FAKETAG1"
+        - name: REDFISH_MANAGER_TYPE
+          value: "BMC"
+        - name: REDFISH_UUID
+          value: "00000000-0000-0000-0000-000000000001"
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fake-redfish
+  namespace: default
+spec:
+  selector:
+    app: fake-redfish
+  ports:
+  - name: https
+    port: 443
+    targetPort: 443

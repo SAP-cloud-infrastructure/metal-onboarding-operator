@@ -42,6 +42,19 @@ k8s_yaml(helm(
 ))
 k8s_resource("metaldhcp", resource_deps = ["crds"])
 
+# --- fake-redfish BMC server ----------------------------------------------------
+# Serves GET /redfish/v1 over HTTPS so moo can exercise the serial-first lookup
+# path locally. ServiceTag/ManagerType are set via env vars in dev/fake-redfish.yaml.
+docker_build(
+    image_ref("fake-redfish"),
+    ".",
+    dockerfile = "dev/fake-redfish/Dockerfile",
+    build_args = {"TARGETARCH": arch, "TARGETOS": "linux"},
+    only = ["dev/fake-redfish/main.go"],
+)
+k8s_yaml("dev/fake-redfish.yaml")
+k8s_resource("fake-redfish", resource_deps = ["crds"])
+
 # --- metal-onboarding-operator --------------------------------------------------
 docker_build(
     image_ref("metal-onboarding-operator"),
