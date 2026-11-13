@@ -4,6 +4,8 @@ github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
 github.com/SAP-cloud-infrastructure/metaldhcp v0.0.0-20261013111444-a66535c0428a h1:N/lyh02CSRWj0B2RWDA8KK1q+Z8X7yTCSRT5xgxNdIg=
 github.com/SAP-cloud-infrastructure/metaldhcp v0.0.0-20261013111444-a66535c0428a/go.mod h1:zAAZwoUimTZgr5geToLGZALuh+sUl0X+eN3BMOroQbk=
+github.com/SAP-cloud-infrastructure/metaldhcp v0.0.0-20261112165339-a3aabb25fe49 h1:LnAJ+PeQ+3mIpRVouJw+WyyxWPsQD0UIYa5WkTq1ldk=
+github.com/SAP-cloud-infrastructure/metaldhcp v0.0.0-20261112165339-a3aabb25fe49/go.mod h1:PRAy1M+aW/Tyg3VCPklYZ281FZ901YRZRX4vygb1OLw=
 github.com/antlr4-go/antlr/v4 v4.13.1 h1:SqQKkuVZ+zWkMMNkjy5FZe5mr5WURWnlpmOuzYWrPrQ=
 github.com/antlr4-go/antlr/v4 v4.13.1/go.mod h1:GKmUxMtwp6ZgGwZSva4eWPC5mS6vUAmOABFgjdkM7Nw=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
