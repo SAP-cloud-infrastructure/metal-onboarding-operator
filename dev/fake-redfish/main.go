@@ -39,7 +39,7 @@ func main() {
 	serviceTag := env("REDFISH_SERVICE_TAG", "FAKETAG1")
 	managerType := env("REDFISH_MANAGER_TYPE", "BMC")
 	uuid := env("REDFISH_UUID", "00000000-0000-0000-0000-000000000001")
-	port := env("REDFISH_PORT", "443")
+	port := env("REDFISH_PORT", "8443")
 
 	tlsCfg, err := selfSignedTLS()
 	if err != nil {

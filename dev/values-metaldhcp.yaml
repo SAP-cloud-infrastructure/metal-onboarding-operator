@@ -42,5 +42,4 @@ debug:
   serverCIDR: /24
 
 tftp:
-  enabled: true
-  nbpFilename: snponly.efi
+  enabled: false

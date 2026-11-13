@@ -32,25 +32,32 @@ arch = str(local("go env GOARCH", quiet=True)).strip()
 docker_build(
     image_ref("metaldhcp"),
     metaldhcp_src,
-    dockerfile = metaldhcp_src + "/Dockerfile.dev",
+    dockerfile = "dev/Dockerfile.metaldhcp",
     build_args = {"TARGETARCH": arch, "TARGETOS": "linux"},
 )
 
 k8s_yaml(helm(
     metaldhcp_src + "/chart/metaldhcp",
+    name = "metaldhcp",
     values = ["./dev/values-metaldhcp.yaml"],
 ))
 k8s_resource("metaldhcp", resource_deps = ["crds"])
+
+# --- dev secrets ----------------------------------------------------------------
+# Stub secrets needed to start the operator in the dev cluster.
+local_resource(
+    "dev-secrets",
+    serve_cmd = None,
+    cmd = "kubectl --context kind-metal-onboarding-operator create secret generic netbox-token --from-literal=token=dummy-dev-token -n default --dry-run=client -o yaml | kubectl --context kind-metal-onboarding-operator apply -f -",
+)
 
 # --- fake-redfish BMC server ----------------------------------------------------
 # Serves GET /redfish/v1 over HTTPS so moo can exercise the serial-first lookup
 # path locally. ServiceTag/ManagerType are set via env vars in dev/fake-redfish.yaml.
 docker_build(
     image_ref("fake-redfish"),
-    ".",
-    dockerfile = "dev/fake-redfish/Dockerfile",
+    "dev/fake-redfish",
     build_args = {"TARGETARCH": arch, "TARGETOS": "linux"},
-    only = ["dev/fake-redfish/main.go"],
 )
 k8s_yaml("dev/fake-redfish.yaml")
 k8s_resource("fake-redfish", resource_deps = ["crds"])
@@ -64,6 +71,7 @@ docker_build(
 
 k8s_yaml(helm(
     "./charts/metal-onboarding-operator",
+    name = "metal-onboarding-operator",
     values = ["./dev/values.yaml"],
 ))
-k8s_resource("metal-onboarding-operator", resource_deps = ["crds"])
+k8s_resource("metal-onboarding-operator", resource_deps = ["crds", "dev-secrets"])

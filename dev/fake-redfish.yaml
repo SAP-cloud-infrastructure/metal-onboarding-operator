@@ -20,7 +20,7 @@ spec:
       - name: fake-redfish
         image: localhost:5001/fake-redfish
         ports:
-        - containerPort: 443
+        - containerPort: 8443
           name: https
         env:
         - name: REDFISH_SERVICE_TAG
@@ -48,4 +48,4 @@ spec:
   ports:
   - name: https
     port: 443
-    targetPort: 443
+    targetPort: 8443
