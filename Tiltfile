@@ -1,4 +1,4 @@
-# Dev environment: metal-onboarding-operator on a local kind cluster.
+# Dev environment: metaldhcp + metal-onboarding-operator on a local kind cluster.
 # Bring-up:  make tilt-up
 # Tear-down: make tilt-down
 
@@ -11,18 +11,38 @@ def image_ref(name):
     return "%s/%s" % (reg_host, name)
 
 # --- CRDs -----------------------------------------------------------------------
-# DHCPLease CRD is owned by metaldhcp; we carry a copy for local dev.
-k8s_yaml("config/crd/external/dhcp.metal.ironcore.dev_dhcpleases.yaml")
+# Both CRDs are owned by metaldhcp; we carry copies for local dev.
+k8s_yaml([
+    "config/crd/external/dhcp.metal.ironcore.dev_dhcpleases.yaml",
+    "config/crd/external/dhcp.metal.ironcore.dev_oobsubnets.yaml",
+])
 
 k8s_resource(
     new_name = "crds",
     objects = [
         "dhcpleases.dhcp.metal.ironcore.dev:customresourcedefinition",
+        "oobsubnets.dhcp.metal.ironcore.dev:customresourcedefinition",
     ],
 )
 
-# --- metal-onboarding-operator --------------------------------------------------
+# --- metaldhcp ------------------------------------------------------------------
+metaldhcp_src = "/Users/d058695/go/pkg/mod/github.com/!s!a!p-cloud-infrastructure/metaldhcp@v0.0.0-20261013111444-a66535c0428a"
+
 arch = str(local("go env GOARCH", quiet=True)).strip()
+docker_build(
+    image_ref("metaldhcp"),
+    metaldhcp_src,
+    dockerfile = metaldhcp_src + "/Dockerfile.dev",
+    build_args = {"TARGETARCH": arch, "TARGETOS": "linux"},
+)
+
+k8s_yaml(helm(
+    metaldhcp_src + "/chart/metaldhcp",
+    values = ["./dev/values-metaldhcp.yaml"],
+))
+k8s_resource("metaldhcp", resource_deps = ["crds"])
+
+# --- metal-onboarding-operator --------------------------------------------------
 docker_build(
     image_ref("metal-onboarding-operator"),
     ".",
@@ -34,4 +54,3 @@ k8s_yaml(helm(
     values = ["./dev/values.yaml"],
 ))
 k8s_resource("metal-onboarding-operator", resource_deps = ["crds"])
-

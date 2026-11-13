@@ -1,0 +1,46 @@
+# Local dev overrides for metaldhcp (make tilt-up).
+# The image is pushed to the local kind registry by Tilt; no pull secret needed.
+
+image:
+  repository: localhost:5001/metaldhcp
+  tag: latest
+
+# Dummy external IP for local dev; no real LoadBalancer is needed.
+externalIP: "192.168.100.1"
+
+server:
+  logLevel: debug
+  leaseTime: 1h
+  netmask: "255.255.255.0"
+
+securityContext:
+  runAsUser: 0
+  capabilities:
+    add:
+      - NET_BIND_SERVICE
+      - NET_RAW
+
+oob:
+  subnets:
+    - cidr: 192.168.100.0/24
+      gateway: 192.168.100.1
+      rangeStart: 192.168.100.10
+      rangeEnd: 192.168.100.100
+      leaseTime: 1h
+      bootURL: https://boot-operator.example.com/boot
+
+  dnsServers:
+    - 8.8.8.8
+    - 8.8.4.4
+  domain: dev.metaldhcp.local
+  ntpServers:
+    - 216.239.35.0
+
+debug:
+  enabled: true
+  serverIP: 192.168.100.1
+  serverCIDR: /24
+
+tftp:
+  enabled: true
+  nbpFilename: snponly.efi
