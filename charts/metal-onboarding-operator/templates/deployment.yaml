@@ -32,6 +32,9 @@ spec:
         - --cluster-name={{ .Values.clusterName }}
         {{- end }}
         - --leader-elect={{ .Values.leaderElect }}
+        {{- if .Values.redfishBaseURL }}
+        - --redfish-base-url={{ .Values.redfishBaseURL }}
+        {{- end }}
         {{- if .Values.labelMap }}
         - --label-map-file=/etc/moo/label-map.yaml
         {{- end }}

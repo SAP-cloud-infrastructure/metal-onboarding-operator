@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -67,6 +68,8 @@ func main() {
 	var netboxTokenFile string
 	var clusterName string
 	var labelMapFile string
+	var redfishProbeTimeout time.Duration
+	var redfishBaseURL string
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -94,6 +97,10 @@ func main() {
 		"Name of this cluster, used to gate onboarding to servers that belong here.")
 	flag.StringVar(&labelMapFile, "label-map-file", "",
 		"Path to a YAML file mapping Kubernetes label keys to NetBox device JSON paths.")
+	flag.DurationVar(&redfishProbeTimeout, "redfish-probe-timeout", 3*time.Second,
+		"Timeout for the initial unauthenticated Redfish probe used for serial number discovery.")
+	flag.StringVar(&redfishBaseURL, "redfish-base-url", "",
+		"Override Redfish endpoint base URL (e.g. https://fake-redfish for local dev). When empty, uses https://<lease-IP>.")
 
 	opts := zap.Options{
 		Development: true,
@@ -182,9 +189,12 @@ func main() {
 	}
 
 	if err := (&controller.DHCPLeaseController{
-		Client:            mgr.GetClient(),
-		Scheme:            mgr.GetScheme(),
-		InventoryProvider: netboxprovider.New(netboxURL, netboxTokenFile, clusterName, labelMap),
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		InventoryProvider:   netboxprovider.New(netboxURL, netboxTokenFile, clusterName, labelMap),
+		EventRecorder:       mgr.GetEventRecorderFor("dhcplease-controller"), //nolint:staticcheck
+		RedfishProbeTimeout: redfishProbeTimeout,
+		RedfishBaseURL:      redfishBaseURL,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DHCPLease")
 		os.Exit(1)

@@ -19,6 +19,11 @@ clusterName: ""
 # Leader election (disable for local dev)
 leaderElect: true
 
+# redfishBaseURL overrides the Redfish endpoint used by the controller.
+# When set, all Redfish probes go to this URL instead of https://<lease-IP>.
+# Useful in dev environments to point at a fake BMC (e.g. "https://fake-redfish").
+redfishBaseURL: ""
+
 serviceAccount:
   create: true
   name: ""
