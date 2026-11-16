@@ -181,13 +181,6 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "DHCPLease")
 		os.Exit(1)
 	}
-	if err := (&controller.ServerDiscoveryController{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ServerDiscovery")
-		os.Exit(1)
-	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
