@@ -37,14 +37,15 @@ import (
 const undiscoveredTaintKey = "metal.ironcore.dev/Undiscovered"
 
 // ServerDiscoveryController watches Server CRs created by moo (identified via
-// the managed-by label) and ensures each gets the Undiscovered NoBind taint
-// plus a ServerReadinessRule that removes it once MMO sets Discovered=True.
+// the managed-by label) and ensures a ServerReadinessRule exists for each one.
+// metal-operator's ServerReadinessRuleServerReconciler applies/removes the taint
+// on the Server based on the rule — moo does not touch server.Spec.Taints directly.
 type ServerDiscoveryController struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=serverreadinessrules,verbs=get;list;watch;create;update;patch;delete
 
 func (r *ServerDiscoveryController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -55,30 +56,11 @@ func (r *ServerDiscoveryController) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if err := r.ensureUndiscoveredTaint(ctx, server); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	if err := r.ensureReadinessRule(ctx, log, server); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
-}
-
-func (r *ServerDiscoveryController) ensureUndiscoveredTaint(ctx context.Context, server *metalv1alpha1.Server) error {
-	for _, t := range server.Spec.Taints {
-		if t.Key == undiscoveredTaintKey && t.Effect == metalv1alpha1.TaintEffectNoBind {
-			return nil
-		}
-	}
-
-	patch := client.MergeFrom(server.DeepCopy())
-	server.Spec.Taints = append(server.Spec.Taints, metalv1alpha1.Taint{
-		Key:    undiscoveredTaintKey,
-		Effect: metalv1alpha1.TaintEffectNoBind,
-	})
-	return r.Patch(ctx, server, patch)
 }
 
 func (r *ServerDiscoveryController) ensureReadinessRule(ctx context.Context, log interface{ Info(string, ...any) }, server *metalv1alpha1.Server) error {

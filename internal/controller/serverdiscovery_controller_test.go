@@ -27,14 +27,11 @@ import (
 )
 
 var _ = Describe("ServerDiscoveryController", func() {
-	newServer := func(name string, labels map[string]string, taints []metalv1alpha1.Taint) *metalv1alpha1.Server {
+	newServer := func(name string, labels map[string]string) *metalv1alpha1.Server {
 		return &metalv1alpha1.Server{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   name,
 				Labels: labels,
-			},
-			Spec: metalv1alpha1.ServerSpec{
-				Taints: taints,
 			},
 		}
 	}
@@ -46,50 +43,15 @@ var _ = Describe("ServerDiscoveryController", func() {
 		return &ServerDiscoveryController{Client: c, Scheme: s}
 	}
 
-	It("adds the Undiscovered taint to a Server that has none", func() {
-		server := newServer("node001", map[string]string{labelManagedBy: labelManagedByValue}, nil)
+	It("creates a ServerReadinessRule with the correct spec and owner reference", func() {
+		server := newServer("node001", map[string]string{labelManagedBy: labelManagedByValue})
 		r := newController(server)
 
 		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "node001"}})
 		Expect(err).NotTo(HaveOccurred())
 
-		updated := &metalv1alpha1.Server{}
-		Expect(r.Get(ctx, types.NamespacedName{Name: "node001"}, updated)).To(Succeed())
-		Expect(updated.Spec.Taints).To(ContainElement(metalv1alpha1.Taint{
-			Key:    undiscoveredTaintKey,
-			Effect: metalv1alpha1.TaintEffectNoBind,
-		}))
-	})
-
-	It("does not double-add the taint when it is already present", func() {
-		server := newServer("node002", map[string]string{labelManagedBy: labelManagedByValue}, []metalv1alpha1.Taint{
-			{Key: undiscoveredTaintKey, Effect: metalv1alpha1.TaintEffectNoBind},
-		})
-		r := newController(server)
-
-		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "node002"}})
-		Expect(err).NotTo(HaveOccurred())
-
-		updated := &metalv1alpha1.Server{}
-		Expect(r.Get(ctx, types.NamespacedName{Name: "node002"}, updated)).To(Succeed())
-		count := 0
-		for _, t := range updated.Spec.Taints {
-			if t.Key == undiscoveredTaintKey {
-				count++
-			}
-		}
-		Expect(count).To(Equal(1))
-	})
-
-	It("creates a ServerReadinessRule with the correct spec and owner reference", func() {
-		server := newServer("node003", map[string]string{labelManagedBy: labelManagedByValue}, nil)
-		r := newController(server)
-
-		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "node003"}})
-		Expect(err).NotTo(HaveOccurred())
-
 		rule := &metalv1alpha1.ServerReadinessRule{}
-		Expect(r.Get(ctx, types.NamespacedName{Name: "node003"}, rule)).To(Succeed())
+		Expect(r.Get(ctx, types.NamespacedName{Name: "node001"}, rule)).To(Succeed())
 
 		Expect(rule.Spec.EnforcementMode).To(Equal(metalv1alpha1.EnforcementModeBootstrapOnly))
 		Expect(rule.Spec.Taint.Key).To(Equal(undiscoveredTaintKey))
@@ -99,21 +61,17 @@ var _ = Describe("ServerDiscoveryController", func() {
 		Expect(rule.Spec.Conditions[0].RequiredStatus).To(Equal(metav1.ConditionTrue))
 
 		Expect(rule.OwnerReferences).To(HaveLen(1))
-		Expect(rule.OwnerReferences[0].Name).To(Equal("node003"))
+		Expect(rule.OwnerReferences[0].Name).To(Equal("node001"))
 	})
 
-	It("is idempotent when taint and rule are already correct", func() {
-		server := newServer("node004", map[string]string{labelManagedBy: labelManagedByValue}, []metalv1alpha1.Taint{
-			{Key: undiscoveredTaintKey, Effect: metalv1alpha1.TaintEffectNoBind},
-		})
+	It("is idempotent when the rule already exists with the correct spec", func() {
+		server := newServer("node002", map[string]string{labelManagedBy: labelManagedByValue})
 		r := newController(server)
 
-		// First reconcile — creates rule
-		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "node004"}})
+		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "node002"}})
 		Expect(err).NotTo(HaveOccurred())
 
-		// Second reconcile — should be a no-op
-		_, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "node004"}})
+		_, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "node002"}})
 		Expect(err).NotTo(HaveOccurred())
 
 		ruleList := &metalv1alpha1.ServerReadinessRuleList{}
