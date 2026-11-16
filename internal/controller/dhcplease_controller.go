@@ -48,6 +48,9 @@ const (
 	annotationManagerType  = "onboarding.metal.ironcore.dev/manager-type"
 	annotationOnboardState = "metal.cloud.sap/onboarding-state"
 
+	labelManagedBy      = "onboarding.metal.ironcore.dev/managed-by"
+	labelManagedByValue = "metal-onboarding-operator"
+
 	onboardStateBMCUnreachable = "bmc-unreachable"
 	onboardStateSerialNotFound = "serial-not-found"
 	onboardStateComplete       = "complete"
@@ -191,10 +194,13 @@ func (r *DHCPLeaseController) reconcileBMC(ctx context.Context, log logr.Logger,
 	}
 
 	if apierrors.IsNotFound(err) {
+		labels := make(map[string]string, len(rec.Labels)+1)
+		maps.Copy(labels, rec.Labels)
+		labels[labelManagedBy] = labelManagedByValue
 		bmc = &metalv1alpha1.BMC{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   rec.ServerName,
-				Labels: rec.Labels,
+				Labels: labels,
 				Annotations: map[string]string{
 					annotationBootstrap:   "true",
 					annotationManagerType: managerType,
@@ -221,6 +227,7 @@ func (r *DHCPLeaseController) reconcileBMC(ctx context.Context, log logr.Logger,
 			bmc.Labels = map[string]string{}
 		}
 		maps.Copy(bmc.Labels, rec.Labels)
+		bmc.Labels[labelManagedBy] = labelManagedByValue
 		if bmc.Annotations == nil {
 			bmc.Annotations = map[string]string{}
 		}
