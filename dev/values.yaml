@@ -13,12 +13,8 @@ leaderElect: false
 # Watch DHCPLease CRs in the default namespace for local testing.
 dhcpLeaseNamespace: default
 
-# NetBox is required; point at a local or dev NetBox instance.
-netbox:
-  url: "http://netbox.local"
-  tokenSecret:
-    name: netbox-token
-    key: token
+# Name of the MetalCluster CR used for local dev inventory.
+clusterName: "dev-cluster"
 
 # Point at the fake Redfish BMC server deployed by Tilt for local dev.
 redfishBaseURL: "https://fake-redfish.default.svc.cluster.local"

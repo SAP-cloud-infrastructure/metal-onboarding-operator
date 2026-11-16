@@ -17,4 +17,4 @@ jobs:
       - name: Lint
         run: helm lint ./charts/metal-onboarding-operator
       - name: Render
-        run: helm template metal-onboarding-operator ./charts/metal-onboarding-operator --set netbox.url=https://netbox.example
+        run: helm template metal-onboarding-operator ./charts/metal-onboarding-operator --set clusterName=test-cluster

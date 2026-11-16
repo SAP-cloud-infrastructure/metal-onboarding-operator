@@ -24,19 +24,10 @@ spec:
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         args:
-        - --netbox-url={{ required "netbox.url is required" .Values.netbox.url }}
-        {{- if .Values.netbox.tokenSecret.name }}
-        - --netbox-token-file=/var/run/secrets/netbox/{{ .Values.netbox.tokenSecret.key }}
-        {{- end }}
-        {{- if .Values.clusterName }}
-        - --cluster-name={{ .Values.clusterName }}
-        {{- end }}
+        - --cluster-name={{ required "clusterName is required" .Values.clusterName }}
         - --leader-elect={{ .Values.leaderElect }}
         {{- if .Values.redfishBaseURL }}
         - --redfish-base-url={{ .Values.redfishBaseURL }}
-        {{- end }}
-        {{- if .Values.labelMap }}
-        - --label-map-file=/etc/moo/label-map.yaml
         {{- end }}
         env:
         {{- if .Values.remoteAPIServer }}
@@ -47,24 +38,12 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        {{- if or .Values.netbox.tokenSecret.name .Values.labelMap .Values.remoteAPIServer }}
-        volumeMounts:
-        {{- if .Values.netbox.tokenSecret.name }}
-        - name: netbox-token
-          mountPath: /var/run/secrets/netbox
-          readOnly: true
-        {{- end }}
-        {{- if .Values.labelMap }}
-        - name: label-map
-          mountPath: /etc/moo
-          readOnly: true
-        {{- end }}
         {{- if .Values.remoteAPIServer }}
+        volumeMounts:
         - name: remote-kubeconfig
           mountPath: /var/run/remote-kubeconfig
         - name: remote-serviceaccount
           mountPath: /var/run/secrets/kubernetes.io/remote-serviceaccount
-        {{- end }}
         {{- end }}
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
@@ -80,22 +59,8 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 10
-      {{- if or .Values.netbox.tokenSecret.name .Values.labelMap .Values.remoteAPIServer }}
-      volumes:
-      {{- if .Values.netbox.tokenSecret.name }}
-      - name: netbox-token
-        secret:
-          secretName: {{ .Values.netbox.tokenSecret.name }}
-          items:
-          - key: {{ .Values.netbox.tokenSecret.key }}
-            path: {{ .Values.netbox.tokenSecret.key }}
-      {{- end }}
-      {{- if .Values.labelMap }}
-      - name: label-map
-        configMap:
-          name: metal-onboarding-operator-label-map
-      {{- end }}
       {{- if .Values.remoteAPIServer }}
+      volumes:
       - name: remote-kubeconfig
         configMap:
           name: {{ .Release.Name }}-remote-kubeconfig
@@ -107,6 +72,5 @@ spec:
             path: token
           - key: bundle.crt
             path: ca.crt
-      {{- end }}
       {{- end }}
       terminationGracePeriodSeconds: 10
