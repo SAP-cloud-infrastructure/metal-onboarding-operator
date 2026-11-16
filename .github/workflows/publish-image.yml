@@ -81,7 +81,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     - name: Build and push Docker image
       uses: docker/build-push-action@v7
-      timeout-minutes: 10
+      timeout-minutes: 40
       with:
         context: .
         platforms: ${{ env.platforms }}
