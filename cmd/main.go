@@ -41,6 +41,8 @@ import (
 	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/controller"
 	dhcpshim "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
 	netboxprovider "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/provider/netbox"
+
+	onboardingv1alpha1 "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -52,6 +54,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(dhcpshim.AddToScheme(scheme))
+	utilruntime.Must(onboardingv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 

@@ -5,6 +5,7 @@ resources:
 # External CRDs owned by metaldhcp, carried here for e2e deployment.
 - external/dhcp.metal.ironcore.dev_dhcpleases.yaml
 - external/dhcp.metal.ironcore.dev_oobsubnets.yaml
+- bases/onboarding.metal.ironcore.dev_metalclusters.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
