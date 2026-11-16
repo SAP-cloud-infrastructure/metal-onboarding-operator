@@ -73,6 +73,17 @@ jobs:
         run: |
           helm package charts/metal-onboarding-operator --version ${{ steps.chart_version.outputs.version }}
 
+      - name: Prepare -crds variant (CRDs in templates)
+        run: |
+          if ls charts/metal-onboarding-operator/crds/*.yaml 2>/dev/null; then
+            cp charts/metal-onboarding-operator/crds/*.yaml charts/metal-onboarding-operator/templates/
+            rm charts/metal-onboarding-operator/crds/*.yaml
+          fi
+
+      - name: Package Helm chart with CRDs in templates
+        run: |
+          helm package charts/metal-onboarding-operator --version ${{ steps.chart_version.outputs.version }}-crds
+
       - name: Log in to GitHub Container Registry
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -80,3 +91,4 @@ jobs:
       - name: Push Helm chart to GHCR
         run: |
           helm push metal-onboarding-operator-${{ steps.chart_version.outputs.version }}.tgz oci://ghcr.io/${{ steps.owner.outputs.value }}/charts
+          helm push metal-onboarding-operator-${{ steps.chart_version.outputs.version }}-crds.tgz oci://ghcr.io/${{ steps.owner.outputs.value }}/charts
