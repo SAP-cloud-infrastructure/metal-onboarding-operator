@@ -36,13 +36,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
-	"sigs.k8s.io/yaml"
-
-	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/controller"
-	dhcpshim "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
-	netboxprovider "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/provider/netbox"
 
 	onboardingv1alpha1 "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/api/v1alpha1"
+	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/controller"
+	dhcpshim "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
+	metalclusterprovider "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/provider/metalcluster"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -67,10 +65,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
-	var netboxURL string
-	var netboxTokenFile string
 	var clusterName string
-	var labelMapFile string
 	var redfishProbeTimeout time.Duration
 	var redfishBaseURL string
 	var tlsOpts []func(*tls.Config)
@@ -92,14 +87,8 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	flag.StringVar(&netboxURL, "netbox-url", "",
-		"Base URL of the NetBox API.")
-	flag.StringVar(&netboxTokenFile, "netbox-token-file", "",
-		"Path to a file containing the NetBox API token. Optional; omit for unauthenticated read access.")
 	flag.StringVar(&clusterName, "cluster-name", "",
-		"Name of this cluster, used to gate onboarding to servers that belong here.")
-	flag.StringVar(&labelMapFile, "label-map-file", "",
-		"Path to a YAML file mapping Kubernetes label keys to NetBox device JSON paths.")
+		"Name of the MetalCluster CR to use for server inventory lookups. Required.")
 	flag.DurationVar(&redfishProbeTimeout, "redfish-probe-timeout", 3*time.Second,
 		"Timeout for the initial unauthenticated Redfish probe used for serial number discovery.")
 	flag.StringVar(&redfishBaseURL, "redfish-base-url", "",
@@ -113,25 +102,12 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	if netboxURL == "" {
+	if clusterName == "" {
 		setupLog.Error(
-			fmt.Errorf("--netbox-url is required"),
+			fmt.Errorf("--cluster-name is required"),
 			"invalid configuration",
 		)
 		os.Exit(1)
-	}
-
-	var labelMap map[string]string
-	if labelMapFile != "" {
-		raw, err := os.ReadFile(labelMapFile)
-		if err != nil {
-			setupLog.Error(err, "unable to read label-map-file", "path", labelMapFile)
-			os.Exit(1)
-		}
-		if err := yaml.Unmarshal(raw, &labelMap); err != nil {
-			setupLog.Error(err, "unable to parse label-map-file", "path", labelMapFile)
-			os.Exit(1)
-		}
 	}
 
 	disableHTTP2 := func(c *tls.Config) {
@@ -194,7 +170,7 @@ func main() {
 	if err := (&controller.DHCPLeaseController{
 		Client:              mgr.GetClient(),
 		Scheme:              mgr.GetScheme(),
-		InventoryProvider:   netboxprovider.New(netboxURL, netboxTokenFile, clusterName, labelMap),
+		InventoryProvider:   metalclusterprovider.New(mgr.GetClient(), clusterName),
 		EventRecorder:       mgr.GetEventRecorderFor("dhcplease-controller"), //nolint:staticcheck
 		RedfishProbeTimeout: redfishProbeTimeout,
 		RedfishBaseURL:      redfishBaseURL,

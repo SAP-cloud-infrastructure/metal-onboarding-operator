@@ -11,10 +11,11 @@ def image_ref(name):
     return "%s/%s" % (reg_host, name)
 
 # --- CRDs -----------------------------------------------------------------------
-# Both CRDs are owned by metaldhcp; we carry copies for local dev.
+# metaldhcp CRDs (DHCPLease, OOBSubnet) and moo's own MetalCluster CRD.
 k8s_yaml([
     "config/crd/external/dhcp.metal.ironcore.dev_dhcpleases.yaml",
     "config/crd/external/dhcp.metal.ironcore.dev_oobsubnets.yaml",
+    "config/crd/bases/onboarding.metal.ironcore.dev_metalclusters.yaml",
 ])
 
 k8s_resource(
@@ -22,6 +23,7 @@ k8s_resource(
     objects = [
         "dhcpleases.dhcp.metal.ironcore.dev:customresourcedefinition",
         "oobsubnets.dhcp.metal.ironcore.dev:customresourcedefinition",
+        "metalclusters.onboarding.metal.ironcore.dev:customresourcedefinition",
     ],
 )
 
@@ -43,12 +45,13 @@ k8s_yaml(helm(
 ))
 k8s_resource("metaldhcp", resource_deps = ["crds"])
 
-# --- dev secrets ----------------------------------------------------------------
-# Stub secrets needed to start the operator in the dev cluster.
-local_resource(
-    "dev-secrets",
-    serve_cmd = None,
-    cmd = "kubectl --context kind-metal-onboarding-operator create secret generic netbox-token --from-literal=token=dummy-dev-token -n default --dry-run=client -o yaml | kubectl --context kind-metal-onboarding-operator apply -f -",
+# --- dev MetalCluster inventory -------------------------------------------------
+# Matches fake-redfish's REDFISH_SERVICE_TAG=FAKETAG1 so the serial lookup hits.
+k8s_yaml("dev/metalcluster-dev.yaml")
+k8s_resource(
+    new_name = "dev-metalcluster",
+    objects = ["dev-cluster:metalcluster"],
+    resource_deps = ["crds"],
 )
 
 # --- fake-redfish BMC server ----------------------------------------------------
@@ -74,4 +77,4 @@ k8s_yaml(helm(
     name = "metal-onboarding-operator",
     values = ["./dev/values.yaml"],
 ))
-k8s_resource("metal-onboarding-operator", resource_deps = ["crds", "dev-secrets"])
+k8s_resource("metal-onboarding-operator", resource_deps = ["crds", "dev-metalcluster"])

@@ -28,12 +28,18 @@ type MetalClusterSpec struct {
 	// Servers is the list of bare-metal servers that belong to this cluster.
 	// +optional
 	// +listType=map
-	// +listMapKey=serial
+	// +listMapKey=name
 	Servers []ServerEntry `json:"servers,omitempty"`
 }
 
 // ServerEntry describes one server in the cluster inventory.
 type ServerEntry struct {
+	// Name is the canonical server name, sourced from the NetBox DCIM device name
+	// (e.g. "node001-bb684"). Used as the BMC CR metadata.name.
+	// +kubebuilder:validation:MinLength=1
+	// +required
+	Name string `json:"name"`
+
 	// Serial is the chassis serial number (manufacturer-assigned), used as the
 	// primary lookup key when a Redfish probe can reach the BMC.
 	// +kubebuilder:validation:MinLength=1
