@@ -35,6 +35,12 @@ rbac:
   # Set to false when RBAC is managed externally (e.g. via Gardener ManagedResource).
   create: true
 
+# serverReadinessRule controls whether the ServerReadinessRule CR is deployed.
+# Requires metal-operator (metal.ironcore.dev/v1alpha1) to be installed in the cluster.
+# Set to false if metal-operator is not present or the rule is managed externally.
+serverReadinessRule:
+  enabled: true
+
 resources:
   requests:
     cpu: 10m
