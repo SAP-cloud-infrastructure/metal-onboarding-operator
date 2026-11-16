@@ -1,3 +1,4 @@
 ## Append samples of your project ##
 resources:
+- onboarding_v1alpha1_metalcluster.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples
