@@ -320,7 +320,7 @@ var _ = Describe("DHCPLeaseController annotation tests (fake client)", func() {
 		Expect(updated.Annotations).To(HaveKeyWithValue(annotationOnboardState, onboardStateBMCUnreachable))
 	})
 
-	It("patches serial-not-in-netbox annotation when Redfish responds but serial not found and MAC not found", func() {
+	It("patches serial-not-found annotation when Redfish responds but serial not found and MAC not found", func() {
 		srv := fakeRedfishServerWithSerial("iDRAC", "MISSING-SERIAL")
 		DeferCleanup(srv.Close)
 
@@ -346,7 +346,7 @@ var _ = Describe("DHCPLeaseController annotation tests (fake client)", func() {
 
 		updated := &dhcpshim.DHCPLease{}
 		Expect(cl.Get(context.Background(), types.NamespacedName{Name: "lease-ann-serial"}, updated)).To(Succeed())
-		Expect(updated.Annotations).To(HaveKeyWithValue(annotationOnboardState, onboardStateSerialNotInNetbox))
+		Expect(updated.Annotations).To(HaveKeyWithValue(annotationOnboardState, onboardStateSerialNotFound))
 	})
 })
 var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {

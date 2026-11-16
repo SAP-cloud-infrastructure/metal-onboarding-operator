@@ -90,6 +90,12 @@ spec:
                         the Server CR created by metal-operator. Specific label keys are mapped to
                         NoBind taints on the Server to gate the onboarding phases driven by mmo.
                       type: object
+                    name:
+                      description: |-
+                        Name is the canonical server name, sourced from the NetBox DCIM device name
+                        (e.g. "node001-bb684"). Used as the BMC CR metadata.name.
+                      minLength: 1
+                      type: string
                     remoteboardMAC:
                       description: |-
                         RemoteboardMAC is the MAC address of the remote-management interface (BMC/iDRAC/iLO).
@@ -102,11 +108,12 @@ spec:
                       minLength: 1
                       type: string
                   required:
+                  - name
                   - serial
                   type: object
                 type: array
                 x-kubernetes-list-map-keys:
-                - serial
+                - name
                 x-kubernetes-list-type: map
             type: object
           status:

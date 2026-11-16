@@ -1,0 +1,13 @@
+apiVersion: onboarding.metal.ironcore.dev/v1alpha1
+kind: MetalCluster
+metadata:
+  name: dev-cluster
+spec:
+  servers:
+    - name: dev-node-001
+      serial: "FAKETAG1"
+      remoteboardMAC: "aa:bb:cc:dd:ee:ff"
+      labels:
+        topology.kubernetes.io/region: local
+        topology.kubernetes.io/zone: dev
+        kubernetes.metal.cloud.sap/cluster: dev-cluster
