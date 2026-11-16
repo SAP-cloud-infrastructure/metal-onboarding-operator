@@ -48,9 +48,9 @@ const (
 	annotationManagerType  = "onboarding.metal.ironcore.dev/manager-type"
 	annotationOnboardState = "metal.cloud.sap/onboarding-state"
 
-	onboardStateBMCUnreachable    = "bmc-unreachable"
-	onboardStateSerialNotInNetbox = "serial-not-in-netbox"
-	onboardStateComplete          = "complete"
+	onboardStateBMCUnreachable = "bmc-unreachable"
+	onboardStateSerialNotFound = "serial-not-found"
+	onboardStateComplete       = "complete"
 
 	redfishProbeTimeout = 10 * time.Second
 )
@@ -127,8 +127,8 @@ func (r *DHCPLeaseController) Reconcile(ctx context.Context, req ctrl.Request) (
 			msg := fmt.Sprintf("MAC %s not found in inventory and BMC at %s was unreachable", mac, ip)
 			if !bmcUnreachable {
 				if serialNotFound {
-					state = onboardStateSerialNotInNetbox
-					reason = "SerialNotInNetbox"
+					state = onboardStateSerialNotFound
+					reason = "SerialNotFound"
 					msg = fmt.Sprintf("serial %s not found in inventory and MAC %s not found either", redfishResult.ServiceTag, mac)
 				} else {
 					// Redfish responded but no ServiceTag — BMC reachable but incomplete data.
@@ -153,6 +153,12 @@ func (r *DHCPLeaseController) Reconcile(ctx context.Context, req ctrl.Request) (
 // reconcileBMC creates or updates the BMC CR and patches the lease annotation to "complete".
 func (r *DHCPLeaseController) reconcileBMC(ctx context.Context, log logr.Logger, lease *dhcpshim.DHCPLease, rec *provider.InventoryRecord, managerType string) (ctrl.Result, error) {
 	_ = log // used via logf.FromContext elsewhere; keep for future structured logging
+
+	// When the inventory source (e.g. MetalCluster) does not carry the OOB IP,
+	// fall back to the lease IP — the BMC that sent the DHCP Discover is at that address.
+	if rec.OOBIP == "" {
+		rec.OOBIP = lease.Spec.IP
+	}
 
 	switch rec.ClusterGate {
 	case provider.ClusterGateElsewhere:
