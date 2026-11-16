@@ -62,10 +62,15 @@ type InventoryRecord struct {
 	Labels map[string]string
 }
 
-// InventoryProvider resolves a MAC address to the inventory data needed for onboarding.
+// InventoryProvider resolves a MAC address or serial number to the inventory data needed for onboarding.
 type InventoryProvider interface {
 	// LookupByMAC returns the InventoryRecord for the given MAC address.
 	// Returns ErrNotFound if no record exists for the MAC.
 	// Returns a retriable error for transient failures (network errors, 5xx responses).
 	LookupByMAC(ctx context.Context, mac string) (*InventoryRecord, error)
+
+	// LookupBySerial returns the InventoryRecord for the given serial number.
+	// Returns ErrNotFound if no record exists for the serial.
+	// Returns a retriable error for transient failures (network errors, 5xx responses).
+	LookupBySerial(ctx context.Context, serial string) (*InventoryRecord, error)
 }

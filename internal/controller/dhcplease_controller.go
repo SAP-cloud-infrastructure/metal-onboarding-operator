@@ -18,16 +18,21 @@ package controller
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
 	"time"
 
+	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -39,25 +44,33 @@ import (
 )
 
 const (
-	annotationBootstrap   = "onboarding.metal.ironcore.dev/bootstrap"
-	annotationManagerType = "onboarding.metal.ironcore.dev/manager-type"
+	annotationBootstrap    = "onboarding.metal.ironcore.dev/bootstrap"
+	annotationManagerType  = "onboarding.metal.ironcore.dev/manager-type"
+	annotationOnboardState = "metal.cloud.sap/onboarding-state"
+
+	onboardStateBMCUnreachable    = "bmc-unreachable"
+	onboardStateSerialNotInNetbox = "serial-not-in-netbox"
+	onboardStateComplete          = "complete"
 
 	redfishProbeTimeout = 10 * time.Second
 )
 
 // DHCPLeaseController watches DHCPLease CRs and drives the full onboarding workflow:
-// inventory lookup → Redfish probe → BMC CR creation.
+// Redfish probe → serial lookup → MAC lookup → BMC CR creation.
 // The BMC CR with bootstrap=true annotation is the handoff signal to metal-maintenance-operator.
 type DHCPLeaseController struct {
 	client.Client
 	Scheme            *runtime.Scheme
 	InventoryProvider provider.InventoryProvider
+	EventRecorder     record.EventRecorder
 	// RedfishBaseURL overrides the Redfish endpoint base URL, used in tests.
-	// When empty, the controller uses http://<lease.Spec.IP> as the base URL.
+	// When empty, the controller uses https://<lease.Spec.IP> as the base URL.
 	RedfishBaseURL string
+	// RedfishProbeTimeout overrides the per-probe HTTP timeout (default 10s).
+	RedfishProbeTimeout time.Duration
 }
 
-// +kubebuilder:rbac:groups=dhcp.metal.ironcore.dev,resources=dhcpleases,verbs=get;list;watch
+// +kubebuilder:rbac:groups=dhcp.metal.ironcore.dev,resources=dhcpleases,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;create;update;patch
 
 // Reconcile drives the full onboarding workflow for a single DHCPLease in one pass.
@@ -83,38 +96,86 @@ func (r *DHCPLeaseController) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	// --- 1. Inventory lookup ---
-	rec, err := r.InventoryProvider.LookupByMAC(ctx, mac)
+	// --- 1. Redfish probe (unauthenticated, short timeout) ---
+	redfishResult, redfishErr := probeRedfish(ctx, r.redfishURL(ip), r.probeTimeout())
+	bmcUnreachable := redfishErr != nil || redfishResult.ManagerType == ""
+
+	// --- 2. Serial lookup (skip if Redfish unreachable or returned no ServiceTag) ---
+	var rec *provider.InventoryRecord
+	var serialNotFound bool
+
+	if !bmcUnreachable && redfishResult.ServiceTag != "" {
+		rec, err := r.InventoryProvider.LookupBySerial(ctx, redfishResult.ServiceTag)
+		if err == nil {
+			return r.reconcileBMC(ctx, log, lease, rec, redfishResult.ManagerType)
+		}
+		if !errors.Is(err, provider.ErrNotFound) {
+			return ctrl.Result{}, fmt.Errorf("serial lookup for %s: %w", redfishResult.ServiceTag, err)
+		}
+		serialNotFound = true
+		_ = rec
+	}
+
+	// --- 3. MAC lookup (fallback) ---
+	var err error
+	rec, err = r.InventoryProvider.LookupByMAC(ctx, mac)
 	if err != nil {
-		if err == provider.ErrNotFound {
-			log.Info("MAC not found in inventory, requeuing", "mac", mac)
+		if errors.Is(err, provider.ErrNotFound) {
+			// Determine annotation value based on what we learned from Redfish.
+			state := onboardStateBMCUnreachable
+			reason := "BMCUnreachable"
+			msg := fmt.Sprintf("MAC %s not found in inventory and BMC at %s was unreachable", mac, ip)
+			if !bmcUnreachable {
+				if serialNotFound {
+					state = onboardStateSerialNotInNetbox
+					reason = "SerialNotInNetbox"
+					msg = fmt.Sprintf("serial %s not found in inventory and MAC %s not found either", redfishResult.ServiceTag, mac)
+				} else {
+					// Redfish responded but no ServiceTag — BMC reachable but incomplete data.
+					state = onboardStateBMCUnreachable
+					reason = "BMCUnreachable"
+					msg = fmt.Sprintf("MAC %s not found in inventory and no serial number available from BMC at %s", mac, ip)
+				}
+			}
+			r.patchLeaseAnnotation(ctx, log, lease, state)
+			if r.EventRecorder != nil {
+				r.EventRecorder.Event(lease, corev1.EventTypeWarning, reason, msg)
+			}
+			log.Info("neither serial nor MAC found in inventory, annotated lease", "mac", mac, "state", state)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("inventory lookup for MAC %s: %w", mac, err)
 	}
 
+	return r.reconcileBMC(ctx, log, lease, rec, redfishResult.ManagerType)
+}
+
+// reconcileBMC creates or updates the BMC CR and patches the lease annotation to "complete".
+func (r *DHCPLeaseController) reconcileBMC(ctx context.Context, log logr.Logger, lease *dhcpshim.DHCPLease, rec *provider.InventoryRecord, managerType string) (ctrl.Result, error) {
+	_ = log // used via logf.FromContext elsewhere; keep for future structured logging
+
 	switch rec.ClusterGate {
 	case provider.ClusterGateElsewhere:
-		log.Info("server belongs to another cluster, skipping", "mac", mac, "server", rec.ServerName)
+		logf.FromContext(ctx).Info("server belongs to another cluster, skipping", "server", rec.ServerName)
 		return ctrl.Result{}, nil
 	case provider.ClusterGateUnknown:
-		log.Info("cluster membership unknown, requeuing", "mac", mac)
+		logf.FromContext(ctx).Info("cluster membership unknown, requeuing", "server", rec.ServerName)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	// --- 2. Redfish probe ---
-	managerType, err := probeRedfish(ctx, r.redfishURL(ip))
+	ip := lease.Spec.IP
+	oobIP, err := metalv1alpha1.ParseIP(rec.OOBIP)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("redfish probe for %s: %w", ip, err)
-	}
-	if managerType == "" {
-		return ctrl.Result{}, fmt.Errorf("redfish probe for %s: no ManagerType in response", ip)
+		return ctrl.Result{}, fmt.Errorf("parse OOB IP %q: %w", ip, err)
 	}
 
-	// --- 3. CreateOrUpdate BMC ---
-	oobIP, err := metalv1alpha1.ParseIP(ip)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("parse lease IP %q: %w", ip, err)
+	if managerType == "" {
+		// Post-inventory Redfish probe to get managerType (full timeout).
+		result, probeErr := probeRedfish(ctx, r.redfishURL(ip), redfishProbeTimeout)
+		if probeErr != nil || result.ManagerType == "" {
+			return ctrl.Result{}, fmt.Errorf("redfish probe for %s: no ManagerType", ip)
+		}
+		managerType = result.ManagerType
 	}
 
 	bmc := &metalv1alpha1.BMC{}
@@ -164,8 +225,30 @@ func (r *DHCPLeaseController) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	log.Info("BMC ready", "name", rec.ServerName, "managerType", managerType)
+	logf.FromContext(ctx).Info("BMC ready", "name", rec.ServerName, "managerType", managerType)
+	r.patchLeaseAnnotation(ctx, logf.FromContext(ctx), lease, onboardStateComplete)
 	return ctrl.Result{}, nil
+}
+
+// patchLeaseAnnotation sets metal.cloud.sap/onboarding-state on the DHCPLease.
+func (r *DHCPLeaseController) patchLeaseAnnotation(ctx context.Context, log logr.Logger, lease *dhcpshim.DHCPLease, state string) {
+	_ = log
+	base := lease.DeepCopy()
+	if lease.Annotations == nil {
+		lease.Annotations = map[string]string{}
+	}
+	lease.Annotations[annotationOnboardState] = state
+	if err := r.Patch(ctx, lease, client.MergeFrom(base)); err != nil {
+		logf.FromContext(ctx).Error(err, "failed to patch lease annotation", "state", state)
+	}
+}
+
+// probeTimeout returns the configured probe timeout, falling back to redfishProbeTimeout.
+func (r *DHCPLeaseController) probeTimeout() time.Duration {
+	if r.RedfishProbeTimeout > 0 {
+		return r.RedfishProbeTimeout
+	}
+	return redfishProbeTimeout
 }
 
 // redfishURL returns the Redfish base URL for the given IP.
@@ -173,37 +256,66 @@ func (r *DHCPLeaseController) redfishURL(ip string) string {
 	if r.RedfishBaseURL != "" {
 		return r.RedfishBaseURL
 	}
-	return fmt.Sprintf("http://%s", ip)
+	return fmt.Sprintf("https://%s", ip)
 }
 
-// probeRedfish performs an unauthenticated GET /redfish/v1 and extracts the ManagerType.
-func probeRedfish(ctx context.Context, baseURL string) (string, error) {
+// redfishResult holds the fields extracted from a Redfish root response.
+type redfishResult struct {
+	ManagerType string
+	ServiceTag  string
+}
+
+// probeRedfish performs an unauthenticated GET /redfish/v1 and extracts ManagerType and ServiceTag.
+// ServiceTag is read from Oem.Dell.ServiceTag; UUID is used as fallback.
+// Returns an empty redfishResult (not an error) when the endpoint is unreachable.
+func probeRedfish(ctx context.Context, baseURL string, timeout time.Duration) (redfishResult, error) {
 	url := baseURL + "/redfish/v1"
-	reqCtx, cancel := context.WithTimeout(ctx, redfishProbeTimeout)
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", err
+		return redfishResult{}, err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	hc := &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // BMC certs are self-signed
+		},
+	}
+	resp, err := hc.Do(req)
 	if err != nil {
-		return "", err
+		return redfishResult{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+		return redfishResult{}, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
 	var body struct {
 		ManagerType string `json:"ManagerType"`
+		UUID        string `json:"UUID"`
+		Oem         struct {
+			Dell struct {
+				ServiceTag string `json:"ServiceTag"`
+			} `json:"Dell"`
+		} `json:"Oem"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", err
+		return redfishResult{}, err
 	}
-	return body.ManagerType, nil
+
+	serviceTag := body.Oem.Dell.ServiceTag
+	if serviceTag == "" {
+		serviceTag = body.UUID
+	}
+
+	return redfishResult{
+		ManagerType: body.ManagerType,
+		ServiceTag:  serviceTag,
+	}, nil
 }
 
 // SetupWithManager registers the DHCPLeaseController with the manager.

@@ -1,0 +1,41 @@
+# Tilt dev build for metaldhcp — skips the iPXE stub (no TFTP sidecar in dev).
+# Use the production Dockerfile for a full build with TFTP support.
+
+FROM --platform=$BUILDPLATFORM golang:1.26.3 AS builder
+
+ARG GOARCH=''
+WORKDIR /workspace
+COPY go.mod go.mod
+COPY go.sum go.sum
+RUN go mod download
+
+COPY main.go main.go
+COPY cmd/ cmd/
+COPY plugins/ plugins/
+COPY internal/ internal/
+COPY api/ api/
+
+ARG TARGETOS
+ARG TARGETARCH
+
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -a -o metaldhcp .
+
+FROM debian:bookworm-slim AS installer
+
+RUN apt-get update \
+  && apt-get -y install --no-install-recommends libcap2-bin \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /workspace/metaldhcp /metaldhcp
+RUN /sbin/setcap 'cap_net_bind_service,cap_net_raw=+ep' /metaldhcp
+
+FROM gcr.io/distroless/base-debian12 AS output-image
+
+WORKDIR /
+COPY --from=installer /metaldhcp /metaldhcp
+
+USER 65532:65532
+ENTRYPOINT ["/metaldhcp"]

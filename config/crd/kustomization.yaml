@@ -2,6 +2,9 @@
 # since it depends on service name and namespace that are out of this kustomize package.
 # It should be run by config/default
 resources:
+# External CRDs owned by metaldhcp, carried here for e2e deployment.
+- external/dhcp.metal.ironcore.dev_dhcpleases.yaml
+- external/dhcp.metal.ironcore.dev_oobsubnets.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

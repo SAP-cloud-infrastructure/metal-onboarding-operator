@@ -19,3 +19,6 @@ netbox:
   tokenSecret:
     name: netbox-token
     key: token
+
+# Point at the fake Redfish BMC server deployed by Tilt for local dev.
+redfishBaseURL: "https://fake-redfish.default.svc.cluster.local"

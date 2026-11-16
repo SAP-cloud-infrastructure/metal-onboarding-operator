@@ -97,71 +97,7 @@ func (p *Provider) LookupByMAC(ctx context.Context, mac string) (*provider.Inven
 		return nil, fmt.Errorf("netbox: MAC %s matched %d interfaces (expected 1)", mac, len(ifaces))
 	}
 
-	deviceID := ifaces[0].Device.ID
-
-	device, rawDevice, err := p.getDevice(ctx, token, deviceID)
-	if err != nil {
-		return nil, fmt.Errorf("netbox: get device %d: %w", deviceID, err)
-	}
-
-	oobIP, err := parseIPFromCIDR(device.OOBIp.Address)
-	if err != nil {
-		return nil, fmt.Errorf("netbox: device %s OOB IP: %w", device.Name, err)
-	}
-
-	region, err := p.resolveRegion(ctx, token, device.Site.ID)
-	if err != nil {
-		return nil, fmt.Errorf("netbox: resolve region for device %s: %w", device.Name, err)
-	}
-
-	nameParts := strings.SplitN(device.Name, "-", 2)
-	nodeName := device.Name
-	bb := ""
-	if len(nameParts) == 2 {
-		nodeName = nameParts[0]
-		bb = nameParts[1]
-	}
-
-	labels := map[string]string{
-		"topology.kubernetes.io/region":           region,
-		"topology.kubernetes.io/zone":             device.Site.Slug,
-		"kubernetes.metal.cloud.sap/cluster":      device.Cluster.Name,
-		"kubernetes.metal.cloud.sap/cluster-type": device.Cluster.Type.Slug,
-		"kubernetes.metal.cloud.sap/name":         device.Name,
-		"kubernetes.metal.cloud.sap/nodename":     nodeName,
-		"kubernetes.metal.cloud.sap/bb":           bb,
-		"kubernetes.metal.cloud.sap/type":         device.DeviceType.Slug,
-		"kubernetes.metal.cloud.sap/role":         device.DeviceRole.Slug,
-		"kubernetes.metal.cloud.sap/platform":     device.Platform.Slug,
-	}
-	for labelKey, jsonPath := range p.labelMap {
-		if v := walkPath(rawDevice, jsonPath); v != "" {
-			labels[labelKey] = v
-		}
-	}
-
-	clusterGate := provider.ClusterGateUnknown
-	if device.Cluster.Name != "" {
-		if device.Cluster.Name == p.clusterName {
-			clusterGate = provider.ClusterGateBelongs
-		} else {
-			clusterGate = provider.ClusterGateElsewhere
-		}
-	}
-
-	bmcHostname, err := p.resolveRemoteboardHostname(ctx, token, deviceID)
-	if err != nil {
-		// Non-fatal: BMC hostname is optional.
-		bmcHostname = ""
-	}
-
-	return &provider.InventoryRecord{
-		ClusterGate: clusterGate,
-		ServerName:  device.Name,
-		OOBIP:       oobIP,
-		BMCHostname: bmcHostname,
-		Labels:      labels,
-	}, nil
+	return p.buildInventoryRecord(ctx, token, ifaces[0].Device.ID)
 }
 
 // resolveRegion fetches the site and then its region to get the region slug.
@@ -432,3 +368,100 @@ func parseIPFromCIDR(cidr string) (string, error) {
 
 // compile-time check that Provider satisfies the interface.
 var _ provider.InventoryProvider = (*Provider)(nil)
+
+// LookupBySerial queries NetBox for a device by serial number and returns its InventoryRecord.
+// Returns ErrNotFound when no device matches the serial. Returns an error when multiple match.
+func (p *Provider) LookupBySerial(ctx context.Context, serial string) (*provider.InventoryRecord, error) {
+	token, err := p.readToken()
+	if err != nil {
+		return nil, fmt.Errorf("netbox: read token: %w", err)
+	}
+
+	devices, err := p.listDevicesBySerial(ctx, token, serial)
+	if err != nil {
+		return nil, fmt.Errorf("netbox: list devices by serial %s: %w", serial, err)
+	}
+	if len(devices) == 0 {
+		return nil, provider.ErrNotFound
+	}
+	if len(devices) > 1 {
+		return nil, fmt.Errorf("netbox: serial %s matched %d devices (expected 1)", serial, len(devices))
+	}
+
+	return p.buildInventoryRecord(ctx, token, devices[0].ID)
+}
+
+// buildInventoryRecord fetches the full device and builds an InventoryRecord from it.
+// Shared by LookupByMAC and LookupBySerial.
+func (p *Provider) buildInventoryRecord(ctx context.Context, token string, deviceID int) (*provider.InventoryRecord, error) {
+	device, rawDevice, err := p.getDevice(ctx, token, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("netbox: get device %d: %w", deviceID, err)
+	}
+
+	oobIP, err := parseIPFromCIDR(device.OOBIp.Address)
+	if err != nil {
+		return nil, fmt.Errorf("netbox: device %s OOB IP: %w", device.Name, err)
+	}
+
+	region, err := p.resolveRegion(ctx, token, device.Site.ID)
+	if err != nil {
+		return nil, fmt.Errorf("netbox: resolve region for device %s: %w", device.Name, err)
+	}
+
+	nameParts := strings.SplitN(device.Name, "-", 2)
+	nodeName := device.Name
+	bb := ""
+	if len(nameParts) == 2 {
+		nodeName = nameParts[0]
+		bb = nameParts[1]
+	}
+
+	labels := map[string]string{
+		"topology.kubernetes.io/region":           region,
+		"topology.kubernetes.io/zone":             device.Site.Slug,
+		"kubernetes.metal.cloud.sap/cluster":      device.Cluster.Name,
+		"kubernetes.metal.cloud.sap/cluster-type": device.Cluster.Type.Slug,
+		"kubernetes.metal.cloud.sap/name":         device.Name,
+		"kubernetes.metal.cloud.sap/nodename":     nodeName,
+		"kubernetes.metal.cloud.sap/bb":           bb,
+		"kubernetes.metal.cloud.sap/type":         device.DeviceType.Slug,
+		"kubernetes.metal.cloud.sap/role":         device.DeviceRole.Slug,
+		"kubernetes.metal.cloud.sap/platform":     device.Platform.Slug,
+	}
+	for labelKey, jsonPath := range p.labelMap {
+		if v := walkPath(rawDevice, jsonPath); v != "" {
+			labels[labelKey] = v
+		}
+	}
+
+	clusterGate := provider.ClusterGateUnknown
+	if device.Cluster.Name != "" {
+		if device.Cluster.Name == p.clusterName {
+			clusterGate = provider.ClusterGateBelongs
+		} else {
+			clusterGate = provider.ClusterGateElsewhere
+		}
+	}
+
+	bmcHostname, err := p.resolveRemoteboardHostname(ctx, token, deviceID)
+	if err != nil {
+		bmcHostname = ""
+	}
+
+	return &provider.InventoryRecord{
+		ClusterGate: clusterGate,
+		ServerName:  device.Name,
+		OOBIP:       oobIP,
+		BMCHostname: bmcHostname,
+		Labels:      labels,
+	}, nil
+}
+
+func (p *Provider) listDevicesBySerial(ctx context.Context, token, serial string) ([]nbDevice, error) {
+	var page nbListResult[nbDevice]
+	if err := p.get(ctx, token, "/api/dcim/devices/", url.Values{"serial": {serial}, "limit": {"2"}}, &page); err != nil {
+		return nil, err
+	}
+	return page.Results, nil
+}

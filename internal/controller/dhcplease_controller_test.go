@@ -48,6 +48,30 @@ func (f *fakeInventory) LookupByMAC(_ context.Context, _ string) (*provider.Inve
 	return f.record, f.err
 }
 
+func (f *fakeInventory) LookupBySerial(_ context.Context, _ string) (*provider.InventoryRecord, error) {
+	return f.record, f.err
+}
+
+// callTracker records which InventoryProvider methods were called.
+type callTracker struct {
+	byMACCalled    bool
+	bySerialCalled bool
+	macRecord      *provider.InventoryRecord
+	macErr         error
+	serialRecord   *provider.InventoryRecord
+	serialErr      error
+}
+
+func (c *callTracker) LookupByMAC(_ context.Context, _ string) (*provider.InventoryRecord, error) {
+	c.byMACCalled = true
+	return c.macRecord, c.macErr
+}
+
+func (c *callTracker) LookupBySerial(_ context.Context, _ string) (*provider.InventoryRecord, error) {
+	c.bySerialCalled = true
+	return c.serialRecord, c.serialErr
+}
+
 func newFakeScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	_ = dhcpshim.AddToScheme(s)
@@ -56,21 +80,28 @@ func newFakeScheme() *runtime.Scheme {
 }
 
 func fakeRedfishServer(managerType string) *httptest.Server {
+	return fakeRedfishServerWithSerial(managerType, "")
+}
+
+func fakeRedfishServerWithSerial(managerType, serviceTag string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/redfish/v1" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		body, _ := json.Marshal(map[string]string{"ManagerType": managerType})
+		body, _ := json.Marshal(map[string]any{
+			"ManagerType": managerType,
+			"Oem":         map[string]any{"Dell": map[string]any{"ServiceTag": serviceTag}},
+		})
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 	}))
 }
 
+const unreachableRedfish = "http://127.0.0.1:1"
+
 var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
-	const (
-		testIP = "10.0.0.1"
-	)
+	const testIP = "10.0.0.1"
 
 	newLease := func(name, mac string) *dhcpshim.DHCPLease {
 		return &dhcpshim.DHCPLease{
@@ -130,7 +161,7 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 			Client:            cl,
 			Scheme:            s,
 			InventoryProvider: inv,
-			RedfishBaseURL:    "http://127.0.0.1:1", // nothing listening
+			RedfishBaseURL:    unreachableRedfish, // nothing listening
 		}
 
 		_, err := r.Reconcile(context.Background(), ctrl.Request{
@@ -157,6 +188,167 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 	})
 })
 
+var _ = Describe("DHCPLeaseController serial-first routing (fake client)", func() {
+	const testIP = "10.0.0.1"
+
+	newLeaseWithScheme := func(name, mac string) (*dhcpshim.DHCPLease, *runtime.Scheme) {
+		lease := &dhcpshim.DHCPLease{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec:       dhcpshim.DHCPLeaseSpec{MACAddress: mac, IP: testIP},
+		}
+		s := newFakeScheme()
+		return lease, s
+	}
+
+	goodRecord := func(name string) *provider.InventoryRecord {
+		return &provider.InventoryRecord{
+			ClusterGate: provider.ClusterGateBelongs,
+			ServerName:  name,
+			OOBIP:       testIP,
+			Labels:      map[string]string{},
+		}
+	}
+
+	It("calls LookupBySerial and NOT LookupByMAC when Redfish returns a ServiceTag", func() {
+		srv := fakeRedfishServerWithSerial("iDRAC", "SVC-1234")
+		DeferCleanup(srv.Close)
+
+		tracker := &callTracker{
+			serialRecord: goodRecord("server-serial"),
+		}
+		lease, s := newLeaseWithScheme("lease-serial", "aa:bb:cc:dd:ee:ff")
+		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
+		r := &DHCPLeaseController{
+			Client:              cl,
+			Scheme:              s,
+			InventoryProvider:   tracker,
+			RedfishBaseURL:      srv.URL,
+			RedfishProbeTimeout: 2 * time.Second,
+		}
+
+		_, err := r.Reconcile(context.Background(), ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: "lease-serial"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tracker.bySerialCalled).To(BeTrue())
+		Expect(tracker.byMACCalled).To(BeFalse())
+	})
+
+	It("skips LookupBySerial and calls LookupByMAC when Redfish is unreachable", func() {
+		tracker := &callTracker{
+			macRecord: goodRecord("server-mac"),
+		}
+		lease, s := newLeaseWithScheme("lease-mac-fallback", "aa:bb:cc:dd:ee:ff")
+		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
+		r := &DHCPLeaseController{
+			Client:              cl,
+			Scheme:              s,
+			InventoryProvider:   tracker,
+			RedfishBaseURL:      unreachableRedfish, // unreachable
+			RedfishProbeTimeout: 100 * time.Millisecond,
+		}
+
+		_, err := r.Reconcile(context.Background(), ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: "lease-mac-fallback"},
+		})
+		// Error expected because post-inventory Redfish probe also fails (no managerType)
+		Expect(err).To(HaveOccurred())
+		Expect(tracker.bySerialCalled).To(BeFalse())
+		Expect(tracker.byMACCalled).To(BeTrue())
+	})
+
+	It("falls through to LookupByMAC when LookupBySerial returns ErrNotFound", func() {
+		srv := fakeRedfishServerWithSerial("iDRAC", "SERIAL-NOT-FOUND")
+		DeferCleanup(srv.Close)
+
+		tracker := &callTracker{
+			serialErr: provider.ErrNotFound,
+			macRecord: goodRecord("server-mac"),
+		}
+		lease, s := newLeaseWithScheme("lease-serial-miss", "aa:bb:cc:dd:ee:ff")
+		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
+		r := &DHCPLeaseController{
+			Client:              cl,
+			Scheme:              s,
+			InventoryProvider:   tracker,
+			RedfishBaseURL:      srv.URL,
+			RedfishProbeTimeout: 2 * time.Second,
+		}
+
+		_, err := r.Reconcile(context.Background(), ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: "lease-serial-miss"},
+		})
+		// managerType is already known from first probe, so no error
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tracker.bySerialCalled).To(BeTrue())
+		Expect(tracker.byMACCalled).To(BeTrue())
+	})
+})
+
+var _ = Describe("DHCPLeaseController annotation tests (fake client)", func() {
+	const testIP = "10.0.0.1"
+
+	newLeaseWithScheme := func(name, mac string) (*dhcpshim.DHCPLease, *runtime.Scheme) {
+		lease := &dhcpshim.DHCPLease{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec:       dhcpshim.DHCPLeaseSpec{MACAddress: mac, IP: testIP},
+		}
+		s := newFakeScheme()
+		return lease, s
+	}
+
+	It("patches bmc-unreachable annotation when Redfish unreachable and MAC not found", func() {
+		inv := &fakeInventory{err: provider.ErrNotFound}
+		lease, s := newLeaseWithScheme("lease-ann-unreachable", "aa:bb:cc:dd:ee:ff")
+		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
+		r := &DHCPLeaseController{
+			Client:              cl,
+			Scheme:              s,
+			InventoryProvider:   inv,
+			RedfishBaseURL:      unreachableRedfish,
+			RedfishProbeTimeout: 100 * time.Millisecond,
+		}
+
+		result, err := r.Reconcile(context.Background(), ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: "lease-ann-unreachable"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+		updated := &dhcpshim.DHCPLease{}
+		Expect(cl.Get(context.Background(), types.NamespacedName{Name: "lease-ann-unreachable"}, updated)).To(Succeed())
+		Expect(updated.Annotations).To(HaveKeyWithValue(annotationOnboardState, onboardStateBMCUnreachable))
+	})
+
+	It("patches serial-not-in-netbox annotation when Redfish responds but serial not found and MAC not found", func() {
+		srv := fakeRedfishServerWithSerial("iDRAC", "MISSING-SERIAL")
+		DeferCleanup(srv.Close)
+
+		tracker := &callTracker{
+			serialErr: provider.ErrNotFound,
+			macErr:    provider.ErrNotFound,
+		}
+		lease, s := newLeaseWithScheme("lease-ann-serial", "aa:bb:cc:dd:ee:ff")
+		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
+		r := &DHCPLeaseController{
+			Client:              cl,
+			Scheme:              s,
+			InventoryProvider:   tracker,
+			RedfishBaseURL:      srv.URL,
+			RedfishProbeTimeout: 2 * time.Second,
+		}
+
+		result, err := r.Reconcile(context.Background(), ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: "lease-ann-serial"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+		updated := &dhcpshim.DHCPLease{}
+		Expect(cl.Get(context.Background(), types.NamespacedName{Name: "lease-ann-serial"}, updated)).To(Succeed())
+		Expect(updated.Annotations).To(HaveKeyWithValue(annotationOnboardState, onboardStateSerialNotInNetbox))
+	})
+})
 var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 	const (
 		testMAC    = "aa:bb:cc:dd:ee:ff"
@@ -254,5 +446,43 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 			}
 		}
 		Expect(found).To(Equal(1))
+	})
+
+	It("patches complete annotation on the DHCPLease after successful BMC creation", func() {
+		uniqueServer := fmt.Sprintf("server-complete-%d", time.Now().UnixNano())
+		inv := &fakeInventory{record: &provider.InventoryRecord{
+			ClusterGate: provider.ClusterGateBelongs,
+			ServerName:  uniqueServer,
+			OOBIP:       testIP,
+			Labels:      map[string]string{},
+		}}
+
+		lease := newLease("bmc-complete")
+		Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, lease) })
+
+		r := &DHCPLeaseController{
+			Client:            k8sClient,
+			Scheme:            k8sClient.Scheme(),
+			InventoryProvider: inv,
+			RedfishBaseURL:    redfishServer.URL,
+		}
+
+		_, err := r.Reconcile(ctx, ctrl.Request{
+			NamespacedName: client.ObjectKeyFromObject(lease),
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		bmcList := &metalv1alpha1.BMCList{}
+		Expect(k8sClient.List(ctx, bmcList)).To(Succeed())
+		for _, b := range bmcList.Items {
+			if b.Name == uniqueServer {
+				DeferCleanup(func() { _ = k8sClient.Delete(ctx, &b) })
+			}
+		}
+
+		updated := &dhcpshim.DHCPLease{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), updated)).To(Succeed())
+		Expect(updated.Annotations).To(HaveKeyWithValue(annotationOnboardState, onboardStateComplete))
 	})
 })
