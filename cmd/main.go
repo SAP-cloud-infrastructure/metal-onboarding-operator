@@ -37,6 +37,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+
 	onboardingv1alpha1 "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/api/v1alpha1"
 	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/controller"
 	dhcpshim "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
@@ -52,6 +54,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(dhcpshim.AddToScheme(scheme))
+	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(onboardingv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
