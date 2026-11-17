@@ -3,7 +3,7 @@ module github.com/SAP-cloud-infrastructure/metal-onboarding-operator
 go 1.26.3
 
 require (
-	github.com/SAP-cloud-infrastructure/metaldhcp v0.0.0-20261013111444-a66535c0428a
+	github.com/SAP-cloud-infrastructure/metaldhcp v0.0.0-20261117072427-7ee7142fdcab
 	github.com/go-logr/logr v1.4.4
 	github.com/ironcore-dev/metal-operator v0.8.0
 	github.com/onsi/ginkgo/v2 v2.32.2
