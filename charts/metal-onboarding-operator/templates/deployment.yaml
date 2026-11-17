@@ -24,7 +24,9 @@ spec:
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         args:
-        - --cluster-name={{ required "clusterName is required" .Values.clusterName }}
+        {{- if .Values.clusterName }}
+        - --cluster-name={{ .Values.clusterName }}
+        {{- end }}
         - --leader-elect={{ .Values.leaderElect }}
         {{- if .Values.redfishBaseURL }}
         - --redfish-base-url={{ .Values.redfishBaseURL }}

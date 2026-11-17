@@ -6,7 +6,7 @@ image:
   pullPolicy: IfNotPresent
 
 # Name of the MetalCluster CR that holds the server inventory for this cluster.
-# Required — the operator exits at startup if this is empty.
+# Optional — when empty, label changes on any MetalCluster CR trigger re-enqueuing of all DHCPLeases.
 clusterName: ""
 
 # Leader election (disable for local dev)
