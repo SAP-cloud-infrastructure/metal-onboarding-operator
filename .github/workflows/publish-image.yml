@@ -4,7 +4,7 @@
 name: Build and publish Docker image
 
 env:
-  platforms: linux/amd64,linux/arm64
+  platforms: linux/amd64
 
 on:
   release:
@@ -59,11 +59,6 @@ jobs:
           type=sha
         flavor: |
           latest=${{ github.ref == 'refs/heads/main' }}
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v4
-      with:
-        image: tonistiigi/binfmt:latest
-        platforms: ${{ env.platforms }}
     - name: Set up Docker Buildx context
       run: |
         docker context create builders
