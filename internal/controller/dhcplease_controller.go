@@ -352,8 +352,11 @@ func (r *DHCPLeaseController) SetupWithManager(mgr ctrl.Manager) error {
 
 // metalClusterToLeases maps a MetalCluster change event to all DHCPLeases so that
 // label changes in the MetalCluster are propagated to existing BMC CRs.
+// When ClusterName is set only changes to that CR trigger re-enqueuing; when empty
+// any MetalCluster change does (useful when the operator manages a single cluster
+// and --cluster-name is not configured).
 func (r *DHCPLeaseController) metalClusterToLeases(ctx context.Context, obj client.Object) []reconcile.Request {
-	if obj.GetName() != r.ClusterName {
+	if r.ClusterName != "" && obj.GetName() != r.ClusterName {
 		return nil
 	}
 	leaseList := &dhcpshim.DHCPLeaseList{}

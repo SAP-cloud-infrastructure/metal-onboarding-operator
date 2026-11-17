@@ -558,10 +558,34 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 		reqs := r.metalClusterToLeases(ctx, mc)
 		Expect(reqs).NotTo(BeEmpty())
 
-		// A different MetalCluster name produces no requests.
+		// A different MetalCluster name produces no requests when ClusterName is set.
 		mcOther := &onboardingv1alpha1.MetalCluster{
 			ObjectMeta: metav1.ObjectMeta{Name: "other-cluster"},
 		}
 		Expect(r.metalClusterToLeases(ctx, mcOther)).To(BeEmpty())
+	})
+
+	It("metalClusterToLeases enqueues all leases for any MetalCluster when ClusterName is empty", func() {
+		lease1 := newLease("enqueue-any-lease-1")
+		lease2 := newLease("enqueue-any-lease-2")
+		Expect(k8sClient.Create(ctx, lease1)).To(Succeed())
+		Expect(k8sClient.Create(ctx, lease2)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, lease1)
+			_ = k8sClient.Delete(ctx, lease2)
+		})
+
+		r := &DHCPLeaseController{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+			// ClusterName intentionally empty
+		}
+
+		for _, name := range []string{"cluster-a", "cluster-b"} {
+			mc := &onboardingv1alpha1.MetalCluster{
+				ObjectMeta: metav1.ObjectMeta{Name: name},
+			}
+			Expect(r.metalClusterToLeases(ctx, mc)).NotTo(BeEmpty())
+		}
 	})
 })

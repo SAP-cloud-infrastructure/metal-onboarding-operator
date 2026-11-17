@@ -19,7 +19,6 @@ package main
 import (
 	"crypto/tls"
 	"flag"
-	"fmt"
 	"os"
 	"time"
 
@@ -106,11 +105,7 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	if clusterName == "" {
-		setupLog.Error(
-			fmt.Errorf("--cluster-name is required"),
-			"invalid configuration",
-		)
-		os.Exit(1)
+		setupLog.Info("--cluster-name not set; MetalCluster watch will trigger on any MetalCluster CR change")
 	}
 
 	disableHTTP2 := func(c *tls.Config) {
