@@ -175,6 +175,7 @@ func main() {
 		Scheme:              mgr.GetScheme(),
 		InventoryProvider:   metalclusterprovider.New(mgr.GetClient(), clusterName),
 		EventRecorder:       mgr.GetEventRecorderFor("dhcplease-controller"), //nolint:staticcheck
+		ClusterName:         clusterName,
 		RedfishProbeTimeout: redfishProbeTimeout,
 		RedfishBaseURL:      redfishBaseURL,
 	}).SetupWithManager(mgr); err != nil {

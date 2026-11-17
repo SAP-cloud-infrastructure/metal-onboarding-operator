@@ -35,10 +35,13 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 
+	onboardingv1alpha1 "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/api/v1alpha1"
 	dhcpshim "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
 	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/provider"
 )
@@ -66,6 +69,9 @@ type DHCPLeaseController struct {
 	Scheme            *runtime.Scheme
 	InventoryProvider provider.InventoryProvider
 	EventRecorder     record.EventRecorder
+	// ClusterName is the metadata.name of the MetalCluster CR this controller watches.
+	// Used to filter MetalCluster watch events to the relevant CR only.
+	ClusterName string
 	// RedfishBaseURL overrides the Redfish endpoint base URL, used in tests.
 	// When empty, the controller uses https://<lease.Spec.IP> as the base URL.
 	RedfishBaseURL string
@@ -75,6 +81,7 @@ type DHCPLeaseController struct {
 
 // +kubebuilder:rbac:groups=dhcp.metal.ironcore.dev,resources=dhcpleases,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=onboarding.metal.ironcore.dev,resources=metalclusters,verbs=get;list;watch
 
 // Reconcile drives the full onboarding workflow for a single DHCPLease in one pass.
 // The reconciler is fully idempotent: if a BMC CR already exists for the server, the
@@ -335,6 +342,31 @@ func probeRedfish(ctx context.Context, baseURL string, timeout time.Duration) (r
 func (r *DHCPLeaseController) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&dhcpshim.DHCPLease{}).
+		Watches(
+			&onboardingv1alpha1.MetalCluster{},
+			handler.EnqueueRequestsFromMapFunc(r.metalClusterToLeases),
+		).
 		Named("dhcplease").
 		Complete(r)
+}
+
+// metalClusterToLeases maps a MetalCluster change event to all DHCPLeases so that
+// label changes in the MetalCluster are propagated to existing BMC CRs.
+func (r *DHCPLeaseController) metalClusterToLeases(ctx context.Context, obj client.Object) []reconcile.Request {
+	if obj.GetName() != r.ClusterName {
+		return nil
+	}
+	leaseList := &dhcpshim.DHCPLeaseList{}
+	if err := r.List(ctx, leaseList); err != nil {
+		logf.FromContext(ctx).Error(err, "failed to list DHCPLeases for MetalCluster re-enqueue")
+		return nil
+	}
+	reqs := make([]reconcile.Request, len(leaseList.Items))
+	for i, lease := range leaseList.Items {
+		reqs[i] = reconcile.Request{NamespacedName: types.NamespacedName{
+			Name:      lease.Name,
+			Namespace: lease.Namespace,
+		}}
+	}
+	return reqs
 }

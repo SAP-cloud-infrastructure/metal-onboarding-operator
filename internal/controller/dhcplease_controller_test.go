@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	onboardingv1alpha1 "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/api/v1alpha1"
 	dhcpshim "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/dhcp"
 	"github.com/SAP-cloud-infrastructure/metal-onboarding-operator/internal/provider"
 )
@@ -484,5 +485,81 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 		updated := &dhcpshim.DHCPLease{}
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), updated)).To(Succeed())
 		Expect(updated.Annotations).To(HaveKeyWithValue(annotationOnboardState, onboardStateComplete))
+	})
+
+	It("updates labels on an existing BMC when MetalCluster labels change", func() {
+		uniqueServer := fmt.Sprintf("server-label-drift-%d", time.Now().UnixNano())
+
+		inv := &fakeInventory{record: &provider.InventoryRecord{
+			ClusterGate: provider.ClusterGateBelongs,
+			ServerName:  uniqueServer,
+			OOBIP:       testIP,
+			Labels:      map[string]string{"topology.kubernetes.io/region": "eu-de-1"},
+		}}
+
+		lease := newLease("bmc-label-drift")
+		Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, lease) })
+
+		r := &DHCPLeaseController{
+			Client:            k8sClient,
+			Scheme:            k8sClient.Scheme(),
+			InventoryProvider: inv,
+			RedfishBaseURL:    redfishServer.URL,
+		}
+
+		// First reconcile: creates the BMC with initial labels.
+		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(lease)})
+		Expect(err).NotTo(HaveOccurred())
+
+		bmc := &metalv1alpha1.BMC{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: uniqueServer}, bmc)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, bmc) })
+		Expect(bmc.Labels).To(HaveKeyWithValue("topology.kubernetes.io/region", "eu-de-1"))
+
+		// Simulate MetalCluster label update: provider now returns updated labels.
+		inv.record.Labels = map[string]string{
+			"topology.kubernetes.io/region": "eu-de-1",
+			"topology.kubernetes.io/zone":   "eu-de-1a",
+		}
+
+		// Second reconcile (triggered by MetalCluster watch): labels should be updated.
+		_, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(lease)})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: uniqueServer}, bmc)).To(Succeed())
+		Expect(bmc.Labels).To(HaveKeyWithValue("topology.kubernetes.io/region", "eu-de-1"))
+		Expect(bmc.Labels).To(HaveKeyWithValue("topology.kubernetes.io/zone", "eu-de-1a"))
+	})
+
+	It("metalClusterToLeases enqueues all leases only for the matching cluster name", func() {
+		clusterName := "test-cluster"
+
+		lease1 := newLease("enqueue-lease-1")
+		lease2 := newLease("enqueue-lease-2")
+		Expect(k8sClient.Create(ctx, lease1)).To(Succeed())
+		Expect(k8sClient.Create(ctx, lease2)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, lease1)
+			_ = k8sClient.Delete(ctx, lease2)
+		})
+
+		r := &DHCPLeaseController{
+			Client:      k8sClient,
+			Scheme:      k8sClient.Scheme(),
+			ClusterName: clusterName,
+		}
+
+		mc := &onboardingv1alpha1.MetalCluster{
+			ObjectMeta: metav1.ObjectMeta{Name: clusterName},
+		}
+		reqs := r.metalClusterToLeases(ctx, mc)
+		Expect(reqs).NotTo(BeEmpty())
+
+		// A different MetalCluster name produces no requests.
+		mcOther := &onboardingv1alpha1.MetalCluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "other-cluster"},
+		}
+		Expect(r.metalClusterToLeases(ctx, mcOther)).To(BeEmpty())
 	})
 })
