@@ -352,9 +352,11 @@ var _ = Describe("DHCPLeaseController annotation tests (fake client)", func() {
 })
 var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 	const (
-		testMAC    = "aa:bb:cc:dd:ee:ff"
-		testIP     = "10.0.0.1"
-		serverName = "rabc12-bb01"
+		testMAC        = "aa:bb:cc:dd:ee:ff"
+		testIP         = "10.0.0.1"
+		serverName     = "rabc12-bb01"
+		testRegionEuDe = "eu-de-1"
+		labelRegion    = "topology.kubernetes.io/region"
 	)
 
 	var redfishServer *httptest.Server
@@ -380,7 +382,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 			ServerName:  serverName,
 			OOBIP:       testIP,
 			Labels: map[string]string{
-				"topology.kubernetes.io/region": "eu-de-1",
+				labelRegion: testRegionEuDe,
 			},
 		}}
 
@@ -406,7 +408,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 
 		Expect(bmc.Annotations).To(HaveKeyWithValue(annotationBootstrap, "true"))
 		Expect(bmc.Annotations).To(HaveKeyWithValue(annotationManagerType, "iDRAC"))
-		Expect(bmc.Labels).To(HaveKeyWithValue("topology.kubernetes.io/region", "eu-de-1"))
+		Expect(bmc.Labels).To(HaveKeyWithValue(labelRegion, testRegionEuDe))
 		Expect(bmc.Spec.Protocol.Name).To(Equal(metalv1alpha1.ProtocolNameRedfish))
 		Expect(bmc.Spec.Protocol.Port).To(Equal(int32(443)))
 	})
@@ -494,7 +496,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 			ClusterGate: provider.ClusterGateBelongs,
 			ServerName:  uniqueServer,
 			OOBIP:       testIP,
-			Labels:      map[string]string{"topology.kubernetes.io/region": "eu-de-1"},
+			Labels:      map[string]string{labelRegion: testRegionEuDe},
 		}}
 
 		lease := newLease("bmc-label-drift")
@@ -515,12 +517,12 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 		bmc := &metalv1alpha1.BMC{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: uniqueServer}, bmc)).To(Succeed())
 		DeferCleanup(func() { _ = k8sClient.Delete(ctx, bmc) })
-		Expect(bmc.Labels).To(HaveKeyWithValue("topology.kubernetes.io/region", "eu-de-1"))
+		Expect(bmc.Labels).To(HaveKeyWithValue(labelRegion, testRegionEuDe))
 
 		// Simulate MetalCluster label update: provider now returns updated labels.
 		inv.record.Labels = map[string]string{
-			"topology.kubernetes.io/region": "eu-de-1",
-			"topology.kubernetes.io/zone":   "eu-de-1a",
+			labelRegion:                   testRegionEuDe,
+			"topology.kubernetes.io/zone": "eu-de-1a",
 		}
 
 		// Second reconcile (triggered by MetalCluster watch): labels should be updated.
@@ -528,7 +530,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: uniqueServer}, bmc)).To(Succeed())
-		Expect(bmc.Labels).To(HaveKeyWithValue("topology.kubernetes.io/region", "eu-de-1"))
+		Expect(bmc.Labels).To(HaveKeyWithValue(labelRegion, testRegionEuDe))
 		Expect(bmc.Labels).To(HaveKeyWithValue("topology.kubernetes.io/zone", "eu-de-1a"))
 	})
 
