@@ -24,3 +24,11 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - onboarding.metal.ironcore.dev
+  resources:
+  - metalclusters
+  verbs:
+  - get
+  - list
+  - watch
