@@ -60,6 +60,11 @@ type InventoryRecord struct {
 	// Labels are topology and cluster labels to apply to the BMC CR metadata.
 	// Keyed by label name (e.g. "topology.kubernetes.io/region").
 	Labels map[string]string
+
+	// InventoryGeneration is the generation of the inventory source (e.g. MetalCluster.metadata.generation)
+	// at the time of lookup. Written as an annotation on the BMC CR so operators can tell
+	// whether the BMC labels are in sync with the current inventory state.
+	InventoryGeneration int64
 }
 
 // InventoryProvider resolves a MAC address or serial number to the inventory data needed for onboarding.
