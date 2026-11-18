@@ -5,6 +5,15 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusersets
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
   - dhcp.metal.ironcore.dev
   resources:
   - dhcpleases

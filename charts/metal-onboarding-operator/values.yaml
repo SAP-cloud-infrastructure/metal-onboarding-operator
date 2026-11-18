@@ -41,6 +41,19 @@ rbac:
 serverReadinessRule:
   enabled: true
 
+# bmcUserSet controls whether moo creates a BMCUserSet per node alongside the BMC.
+# When setupCredentialRef.name is empty (default), no BMCUserSet is created.
+bmcUserSet:
+  setupCredentialRef:
+    name: ""
+    namespace: metal-servers
+  factoryUserNames: support
+  rotationStrategy: DualAccount
+  userName: metal
+  roleID: Administrator
+  rotationPeriod: 720h
+  credentialSecretNamespace: metal-servers
+
 resources:
   requests:
     cpu: 10m
