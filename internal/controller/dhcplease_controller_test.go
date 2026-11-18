@@ -147,7 +147,7 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 	})
 
-	It("returns an error when the Redfish probe fails", func() {
+	It("succeeds when Redfish is unreachable but MAC is in inventory", func() {
 		inv := &fakeInventory{record: &provider.InventoryRecord{
 			ClusterGate: provider.ClusterGateBelongs,
 			ServerName:  "some-server",
@@ -168,7 +168,7 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 		_, err := r.Reconcile(context.Background(), ctrl.Request{
 			NamespacedName: types.NamespacedName{Name: "lease-4"},
 		})
-		Expect(err).To(HaveOccurred())
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("skips a DHCPLease with no MACAddress", func() {
@@ -252,8 +252,7 @@ var _ = Describe("DHCPLeaseController serial-first routing (fake client)", func(
 		_, err := r.Reconcile(context.Background(), ctrl.Request{
 			NamespacedName: types.NamespacedName{Name: "lease-mac-fallback"},
 		})
-		// Error expected because post-inventory Redfish probe also fails (no managerType)
-		Expect(err).To(HaveOccurred())
+		Expect(err).NotTo(HaveOccurred())
 		Expect(tracker.bySerialCalled).To(BeFalse())
 		Expect(tracker.byMACCalled).To(BeTrue())
 	})

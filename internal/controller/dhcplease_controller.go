@@ -108,13 +108,14 @@ func (r *DHCPLeaseController) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// --- 1. Redfish probe (unauthenticated, short timeout) ---
 	redfishResult, redfishErr := probeRedfish(ctx, r.redfishURL(ip), r.probeTimeout())
-	bmcUnreachable := redfishErr != nil || redfishResult.ManagerType == ""
+	bmcUnreachable := redfishErr != nil
+	bmcReachable := !bmcUnreachable
 
 	// --- 2. Serial lookup (skip if Redfish unreachable or returned no ServiceTag) ---
 	var rec *provider.InventoryRecord
 	var serialNotFound bool
 
-	if !bmcUnreachable && redfishResult.ServiceTag != "" {
+	if bmcReachable && redfishResult.ServiceTag != "" {
 		rec, err := r.InventoryProvider.LookupBySerial(ctx, redfishResult.ServiceTag)
 		if err == nil {
 			return r.reconcileBMC(ctx, log, lease, rec, redfishResult.ManagerType)
@@ -135,7 +136,7 @@ func (r *DHCPLeaseController) Reconcile(ctx context.Context, req ctrl.Request) (
 			state := onboardStateBMCUnreachable
 			reason := "BMCUnreachable"
 			msg := fmt.Sprintf("MAC %s not found in inventory and BMC at %s was unreachable", mac, ip)
-			if !bmcUnreachable {
+			if bmcReachable {
 				if serialNotFound {
 					state = onboardStateSerialNotFound
 					reason = "SerialNotFound"
@@ -185,15 +186,6 @@ func (r *DHCPLeaseController) reconcileBMC(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, fmt.Errorf("parse OOB IP %q: %w", ip, err)
 	}
 
-	if managerType == "" {
-		// Post-inventory Redfish probe to get managerType (full timeout).
-		result, probeErr := probeRedfish(ctx, r.redfishURL(ip), redfishProbeTimeout)
-		if probeErr != nil || result.ManagerType == "" {
-			return ctrl.Result{}, fmt.Errorf("redfish probe for %s: no ManagerType", ip)
-		}
-		managerType = result.ManagerType
-	}
-
 	bmc := &metalv1alpha1.BMC{}
 	err = r.Get(ctx, types.NamespacedName{Name: rec.ServerName}, bmc)
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -209,8 +201,7 @@ func (r *DHCPLeaseController) reconcileBMC(ctx context.Context, log logr.Logger,
 				Name:   rec.ServerName,
 				Labels: labels,
 				Annotations: map[string]string{
-					annotationBootstrap:   "true",
-					annotationManagerType: managerType,
+					annotationBootstrap: "true",
 				},
 			},
 			Spec: metalv1alpha1.BMCSpec{
@@ -223,6 +214,9 @@ func (r *DHCPLeaseController) reconcileBMC(ctx context.Context, log logr.Logger,
 		}
 		if rec.BMCHostname != "" {
 			bmc.Spec.Hostname = &rec.BMCHostname
+		}
+		if managerType != "" {
+			bmc.Annotations[annotationManagerType] = managerType
 		}
 		if err := r.Create(ctx, bmc); err != nil {
 			return ctrl.Result{}, fmt.Errorf("create BMC %s: %w", rec.ServerName, err)
@@ -239,7 +233,9 @@ func (r *DHCPLeaseController) reconcileBMC(ctx context.Context, log logr.Logger,
 			bmc.Annotations = map[string]string{}
 		}
 		bmc.Annotations[annotationBootstrap] = "true"
-		bmc.Annotations[annotationManagerType] = managerType
+		if managerType != "" {
+			bmc.Annotations[annotationManagerType] = managerType
+		}
 		if err := r.Patch(ctx, bmc, patch); err != nil {
 			return ctrl.Result{}, fmt.Errorf("patch BMC %s: %w", rec.ServerName, err)
 		}
