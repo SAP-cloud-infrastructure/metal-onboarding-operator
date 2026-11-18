@@ -108,13 +108,14 @@ func (r *DHCPLeaseController) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// --- 1. Redfish probe (unauthenticated, short timeout) ---
 	redfishResult, redfishErr := probeRedfish(ctx, r.redfishURL(ip), r.probeTimeout())
-	bmcUnreachable := redfishErr != nil || redfishResult.ManagerType == ""
+	bmcUnreachable := redfishErr != nil
+	bmcReachable := !bmcUnreachable
 
 	// --- 2. Serial lookup (skip if Redfish unreachable or returned no ServiceTag) ---
 	var rec *provider.InventoryRecord
 	var serialNotFound bool
 
-	if !bmcUnreachable && redfishResult.ServiceTag != "" {
+	if bmcReachable && redfishResult.ServiceTag != "" {
 		rec, err := r.InventoryProvider.LookupBySerial(ctx, redfishResult.ServiceTag)
 		if err == nil {
 			return r.reconcileBMC(ctx, log, lease, rec, redfishResult.ManagerType)
@@ -135,7 +136,7 @@ func (r *DHCPLeaseController) Reconcile(ctx context.Context, req ctrl.Request) (
 			state := onboardStateBMCUnreachable
 			reason := "BMCUnreachable"
 			msg := fmt.Sprintf("MAC %s not found in inventory and BMC at %s was unreachable", mac, ip)
-			if !bmcUnreachable {
+			if bmcReachable {
 				if serialNotFound {
 					state = onboardStateSerialNotFound
 					reason = "SerialNotFound"
