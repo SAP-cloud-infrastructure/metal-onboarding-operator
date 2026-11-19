@@ -6,7 +6,7 @@ metadata:
   labels:
     {{- include "metal-onboarding-operator.labels" . | nindent 4 }}
 rules:
-{{ (.Files.Get "rbac/role.yaml" | fromYaml).rules | toYaml | nindent 0 -}}
+{{ (.Files.Get "rbac/role.yaml" | fromYaml).rules | toYaml | nindent 0 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
