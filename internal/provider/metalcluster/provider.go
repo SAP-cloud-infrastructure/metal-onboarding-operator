@@ -70,10 +70,15 @@ func (p *Provider) getMetalCluster(ctx context.Context) (*onboardingv1alpha1.Met
 }
 
 func recordFrom(s onboardingv1alpha1.ServerEntry, generation int64) *provider.InventoryRecord {
+	hostname := s.RemoteboardHostname
+	if hostname == "" {
+		hostname = s.Name
+	}
 	return &provider.InventoryRecord{
 		ClusterGate:         provider.ClusterGateBelongs,
 		ServerName:          s.Name,
 		OOBIP:               "",
+		BMCHostname:         hostname,
 		Labels:              s.Labels,
 		InventoryGeneration: generation,
 	}
