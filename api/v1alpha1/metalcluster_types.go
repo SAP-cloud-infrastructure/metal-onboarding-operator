@@ -51,6 +51,12 @@ type ServerEntry struct {
 	// +optional
 	RemoteboardMAC string `json:"remoteboardMAC,omitempty"`
 
+	// RemoteboardHostname is the DNS hostname of the remote-management interface
+	// (e.g. "node008r-bb098.cc.qa-de-1.cloud.sap"). When set, it is written to
+	// bmc.spec.hostname on the BMC CR.
+	// +optional
+	RemoteboardHostname string `json:"remoteboardHostname,omitempty"`
+
 	// Interfaces lists the known data-plane network interfaces of the server.
 	// +optional
 	Interfaces []InterfaceEntry `json:"interfaces,omitempty"`
