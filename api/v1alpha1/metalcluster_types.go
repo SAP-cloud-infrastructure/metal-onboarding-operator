@@ -51,6 +51,12 @@ type ServerEntry struct {
 	// +optional
 	RemoteboardMAC string `json:"remoteboardMAC,omitempty"`
 
+	// RemoteboardHostname is the DNS hostname of the remote-management interface
+	// (BMC/iDRAC/iLO), sourced from NetBox IPAM. Written to BMC spec.hostname.
+	// Falls back to Name when empty.
+	// +optional
+	RemoteboardHostname string `json:"remoteboardHostname,omitempty"`
+
 	// Interfaces lists the known data-plane network interfaces of the server.
 	// +optional
 	Interfaces []InterfaceEntry `json:"interfaces,omitempty"`
