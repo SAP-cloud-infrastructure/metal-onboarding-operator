@@ -31,6 +31,16 @@ spec:
         {{- if .Values.redfishBaseURL }}
         - --redfish-base-url={{ .Values.redfishBaseURL }}
         {{- end }}
+        {{- if .Values.bmcUserSet.setupCredentialRef.name }}
+        - --bmc-userset-setup-credential-ref-name={{ .Values.bmcUserSet.setupCredentialRef.name }}
+        - --bmc-userset-setup-credential-ref-namespace={{ .Values.bmcUserSet.setupCredentialRef.namespace }}
+        - --bmc-userset-factory-usernames={{ .Values.bmcUserSet.factoryUserNames }}
+        - --bmc-userset-rotation-strategy={{ .Values.bmcUserSet.rotationStrategy }}
+        - --bmc-userset-username={{ .Values.bmcUserSet.userName }}
+        - --bmc-userset-role-id={{ .Values.bmcUserSet.roleID }}
+        - --bmc-userset-rotation-period={{ .Values.bmcUserSet.rotationPeriod }}
+        - --bmc-userset-credential-secret-namespace={{ .Values.bmcUserSet.credentialSecretNamespace }}
+        {{- end }}
         env:
         {{- if .Values.remoteAPIServer }}
         - name: KUBECONFIG

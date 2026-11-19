@@ -22,6 +22,9 @@ import (
 	"os"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -36,6 +39,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 
 	onboardingv1alpha1 "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/api/v1alpha1"
@@ -55,6 +59,7 @@ func init() {
 	utilruntime.Must(dhcpshim.AddToScheme(scheme))
 	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(onboardingv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(baseboardv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -71,6 +76,16 @@ func main() {
 	var redfishProbeTimeout time.Duration
 	var redfishBaseURL string
 	var tlsOpts []func(*tls.Config)
+
+	// BMCUserSet config — when setupCredentialRefName is empty, no BMCUserSet is created.
+	var bmcUserSetSetupCredentialRefName string
+	var bmcUserSetSetupCredentialRefNamespace string
+	var bmcUserSetFactoryUserNames string
+	var bmcUserSetRotationStrategy string
+	var bmcUserSetUserName string
+	var bmcUserSetRoleID string
+	var bmcUserSetRotationPeriod time.Duration
+	var bmcUserSetCredentialSecretNamespace string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -95,6 +110,24 @@ func main() {
 		"Timeout for the initial unauthenticated Redfish probe used for serial number discovery.")
 	flag.StringVar(&redfishBaseURL, "redfish-base-url", "",
 		"Override Redfish endpoint base URL (e.g. https://fake-redfish for local dev). When empty, uses https://<lease-IP>.")
+	flag.StringVar(&bmcUserSetSetupCredentialRefName, "bmc-userset-setup-credential-ref-name", "",
+		"Name of the Secret (in --bmc-userset-setup-credential-ref-namespace) holding the factory BMC credential "+
+			"used to bootstrap new BMCUserSets. When empty, no BMCUserSet is created.")
+	flag.StringVar(&bmcUserSetSetupCredentialRefNamespace, "bmc-userset-setup-credential-ref-namespace", "metal-servers",
+		"Namespace of the setup credential Secret referenced by --bmc-userset-setup-credential-ref-name.")
+	flag.StringVar(&bmcUserSetFactoryUserNames, "bmc-userset-factory-usernames", "support",
+		"Comma-separated list of factory BMC usernames to rotate after bootstrap.")
+	flag.StringVar(&bmcUserSetRotationStrategy, "bmc-userset-rotation-strategy",
+		string(baseboardv1alpha1.RotationStrategyDualAccount),
+		"BMCUserSet rotation strategy: DualAccount or SingleAccount.")
+	flag.StringVar(&bmcUserSetUserName, "bmc-userset-username", "metal",
+		"Username for the managed BMC account created by the BMCUserSet.")
+	flag.StringVar(&bmcUserSetRoleID, "bmc-userset-role-id", "Administrator",
+		"Redfish role ID for the managed BMC account.")
+	flag.DurationVar(&bmcUserSetRotationPeriod, "bmc-userset-rotation-period", 720*time.Hour,
+		"How often the managed BMC account password is rotated.")
+	flag.StringVar(&bmcUserSetCredentialSecretNamespace, "bmc-userset-credential-secret-namespace", "metal-servers",
+		"Namespace in which stable credential Secrets are created by the BMCUserSet.")
 
 	opts := zap.Options{
 		Development: true,
@@ -106,6 +139,9 @@ func main() {
 
 	if clusterName == "" {
 		setupLog.Info("--cluster-name not set; MetalCluster watch will trigger on any MetalCluster CR change")
+	}
+	if bmcUserSetSetupCredentialRefName == "" {
+		setupLog.Info("--bmc-userset-setup-credential-ref-name not set; BMCUserSet creation disabled")
 	}
 
 	disableHTTP2 := func(c *tls.Config) {
@@ -173,6 +209,16 @@ func main() {
 		ClusterName:         clusterName,
 		RedfishProbeTimeout: redfishProbeTimeout,
 		RedfishBaseURL:      redfishBaseURL,
+		BMCUserSet: buildBMCUserSetConfig(
+			bmcUserSetSetupCredentialRefName,
+			bmcUserSetSetupCredentialRefNamespace,
+			bmcUserSetFactoryUserNames,
+			bmcUserSetRotationStrategy,
+			bmcUserSetUserName,
+			bmcUserSetRoleID,
+			bmcUserSetRotationPeriod,
+			bmcUserSetCredentialSecretNamespace,
+		),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "DHCPLease")
 		os.Exit(1)
@@ -196,4 +242,47 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func buildBMCUserSetConfig(
+	credentialRefName, credentialRefNamespace string,
+	factoryUserNames, rotationStrategy, userName, roleID string,
+	rotationPeriod time.Duration,
+	credentialSecretNamespace string,
+) *controller.BMCUserSetConfig {
+	if credentialRefName == "" {
+		return nil
+	}
+	var userNames []string
+	for _, n := range splitComma(factoryUserNames) {
+		if n != "" {
+			userNames = append(userNames, n)
+		}
+	}
+	return &controller.BMCUserSetConfig{
+		SetupCredentialRef: corev1.SecretReference{
+			Name:      credentialRefName,
+			Namespace: credentialRefNamespace,
+		},
+		FactoryUserNames:          userNames,
+		RotationStrategy:          baseboardv1alpha1.RotationStrategy(rotationStrategy),
+		UserName:                  userName,
+		RoleID:                    roleID,
+		RotationPeriod:            metav1.Duration{Duration: rotationPeriod},
+		CredentialSecretNamespace: credentialSecretNamespace,
+	}
+}
+
+func splitComma(s string) []string {
+	var out []string
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		if i == len(s) || s[i] == ',' {
+			if part := s[start:i]; part != "" {
+				out = append(out, part)
+			}
+			start = i + 1
+		}
+	}
+	return out
 }

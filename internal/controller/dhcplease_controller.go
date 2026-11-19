@@ -39,6 +39,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 
 	onboardingv1alpha1 "github.com/SAP-cloud-infrastructure/metal-onboarding-operator/api/v1alpha1"
@@ -62,7 +63,7 @@ const (
 )
 
 // DHCPLeaseController watches DHCPLease CRs and drives the full onboarding workflow:
-// Redfish probe → serial lookup → MAC lookup → BMC CR creation.
+// Redfish probe → serial lookup → MAC lookup → BMC CR creation → BMCUserSet creation.
 // The BMC CR with bootstrap=true annotation is the handoff signal to metal-maintenance-operator.
 type DHCPLeaseController struct {
 	client.Client
@@ -77,11 +78,27 @@ type DHCPLeaseController struct {
 	RedfishBaseURL string
 	// RedfishProbeTimeout overrides the per-probe HTTP timeout (default 10s).
 	RedfishProbeTimeout time.Duration
+	// BMCUserSet holds the template config for BMCUserSet objects created per node.
+	// When nil, no BMCUserSet is created (e.g. in tests or when not configured).
+	BMCUserSet *BMCUserSetConfig
+}
+
+// BMCUserSetConfig holds the template fields written into each BMCUserSet created by moo.
+// All fields map 1:1 to the corresponding BMCUserSet spec fields.
+type BMCUserSetConfig struct {
+	SetupCredentialRef        corev1.SecretReference
+	FactoryUserNames          []string
+	RotationStrategy          baseboardv1alpha1.RotationStrategy
+	UserName                  string
+	RoleID                    string
+	RotationPeriod            metav1.Duration
+	CredentialSecretNamespace string
 }
 
 // +kubebuilder:rbac:groups=dhcp.metal.ironcore.dev,resources=dhcpleases,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=onboarding.metal.ironcore.dev,resources=metalclusters,verbs=get;list;watch
+// +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusersets,verbs=get;list;watch;create
 
 // Reconcile drives the full onboarding workflow for a single DHCPLease in one pass.
 // The reconciler is fully idempotent: if a BMC CR already exists for the server, the
@@ -243,7 +260,66 @@ func (r *DHCPLeaseController) reconcileBMC(ctx context.Context, log logr.Logger,
 
 	logf.FromContext(ctx).Info("BMC ready", "name", rec.ServerName, "managerType", managerType)
 	r.patchLeaseAnnotation(ctx, logf.FromContext(ctx), lease, onboardStateComplete)
+
+	if err := r.reconcileBMCUserSet(ctx, rec.ServerName); err != nil {
+		return ctrl.Result{}, fmt.Errorf("reconcile BMCUserSet %s: %w", rec.ServerName, err)
+	}
+
 	return ctrl.Result{}, nil
+}
+
+// reconcileBMCUserSet creates a BMCUserSet for the given BMC name if one does not exist.
+// It is a no-op when BMCUserSet config is not set on the controller.
+func (r *DHCPLeaseController) reconcileBMCUserSet(ctx context.Context, bmcName string) error {
+	if r.BMCUserSet == nil {
+		return nil
+	}
+	cfg := r.BMCUserSet
+
+	existing := &baseboardv1alpha1.BMCUserSet{}
+	err := r.Get(ctx, types.NamespacedName{Name: bmcName}, existing)
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("get BMCUserSet %s: %w", bmcName, err)
+	}
+
+	rotationPeriod := cfg.RotationPeriod
+	historyLimit := int32(10)
+	retainCredential := true
+	set := &baseboardv1alpha1.BMCUserSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: bmcName,
+		},
+		Spec: baseboardv1alpha1.BMCUserSetSpec{
+			BMCSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"kubernetes.metal.cloud.sap/name": bmcName,
+				},
+			},
+			SetupCredentialRef: &cfg.SetupCredentialRef,
+			RotationStrategy:   cfg.RotationStrategy,
+			Template: baseboardv1alpha1.BMCUserTemplate{
+				UserName:                     cfg.UserName,
+				RoleID:                       cfg.RoleID,
+				RotationPeriod:               &rotationPeriod,
+				CredentialSecretNameTemplate: "bmc-metal-cred-{{ .BMCName }}",
+				CredentialSecretNamespace:    cfg.CredentialSecretNamespace,
+				RotationHistoryLimit:         &historyLimit,
+			},
+			FactoryAccount: &baseboardv1alpha1.FactoryAccount{
+				Action:           baseboardv1alpha1.FactoryAccountActionRotate,
+				UserNames:        cfg.FactoryUserNames,
+				RetainCredential: &retainCredential,
+			},
+		},
+	}
+	if err := r.Create(ctx, set); err != nil {
+		return fmt.Errorf("create BMCUserSet %s: %w", bmcName, err)
+	}
+	logf.FromContext(ctx).Info("Created BMCUserSet", "name", bmcName)
+	return nil
 }
 
 // patchLeaseAnnotation sets metal.cloud.sap/onboarding-state on the DHCPLease.
