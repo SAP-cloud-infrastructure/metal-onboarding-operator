@@ -10,6 +10,8 @@ github.com/SAP-cloud-infrastructure/metaldhcp v0.0.0-20261119065517-8b5213dd3cbd
 github.com/SAP-cloud-infrastructure/metaldhcp v0.0.0-20261119065517-8b5213dd3cbd/go.mod h1:XZnHBk4BuQv05XGVEJp/mM6waWCFzLRmWcr3CJGvsrg=
 github.com/SAP-cloud-infrastructure/metaldhcp v0.0.0-20261119074719-60ba9099bc0c h1:tJQUT+iO7aAQMc33kxjEhF8hobwO6iKcLmXgbJO0pHA=
 github.com/SAP-cloud-infrastructure/metaldhcp v0.0.0-20261119074719-60ba9099bc0c/go.mod h1:eZ7vJOQ+pJEoGOV5nXNQUaf/vSzsM+dJD42tGyQRqwo=
+github.com/SAP-cloud-infrastructure/metaldhcp v0.0.0-20261119121602-65f593071972 h1:MzJ7H1Nxj7nucNv5rrWXB4/IClBCrCd3+gOR1TOieQc=
+github.com/SAP-cloud-infrastructure/metaldhcp v0.0.0-20261119121602-65f593071972/go.mod h1:eZ7vJOQ+pJEoGOV5nXNQUaf/vSzsM+dJD42tGyQRqwo=
 github.com/antlr4-go/antlr/v4 v4.13.1 h1:SqQKkuVZ+zWkMMNkjy5FZe5mr5WURWnlpmOuzYWrPrQ=
 github.com/antlr4-go/antlr/v4 v4.13.1/go.mod h1:GKmUxMtwp6ZgGwZSva4eWPC5mS6vUAmOABFgjdkM7Nw=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
