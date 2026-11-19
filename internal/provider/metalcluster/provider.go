@@ -39,7 +39,7 @@ func (p *Provider) LookupBySerial(ctx context.Context, serial string) (*provider
 	serial = strings.ToUpper(serial)
 	for _, s := range mc.Spec.Servers {
 		if strings.ToUpper(s.Serial) == serial {
-			return recordFrom(s), nil
+			return recordFrom(s, mc.Generation), nil
 		}
 	}
 	return nil, provider.ErrNotFound
@@ -55,7 +55,7 @@ func (p *Provider) LookupByMAC(ctx context.Context, mac string) (*provider.Inven
 	mac = normMAC(mac)
 	for _, s := range mc.Spec.Servers {
 		if normMAC(s.RemoteboardMAC) == mac {
-			return recordFrom(s), nil
+			return recordFrom(s, mc.Generation), nil
 		}
 	}
 	return nil, provider.ErrNotFound
@@ -69,13 +69,13 @@ func (p *Provider) getMetalCluster(ctx context.Context) (*onboardingv1alpha1.Met
 	return mc, nil
 }
 
-func recordFrom(s onboardingv1alpha1.ServerEntry) *provider.InventoryRecord {
+func recordFrom(s onboardingv1alpha1.ServerEntry, generation int64) *provider.InventoryRecord {
 	return &provider.InventoryRecord{
-		ClusterGate: provider.ClusterGateBelongs,
-		ServerName:  s.Name,
-		// OOBIP is not in MetalCluster — the caller provides the lease IP directly.
-		OOBIP:  "",
-		Labels: s.Labels,
+		ClusterGate:         provider.ClusterGateBelongs,
+		ServerName:          s.Name,
+		OOBIP:               "",
+		Labels:              s.Labels,
+		InventoryGeneration: generation,
 	}
 }
 

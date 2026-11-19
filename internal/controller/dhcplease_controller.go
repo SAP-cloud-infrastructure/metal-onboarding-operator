@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -48,9 +49,10 @@ import (
 )
 
 const (
-	annotationBootstrap    = "onboarding.metal.ironcore.dev/bootstrap"
-	annotationManagerType  = "onboarding.metal.ironcore.dev/manager-type"
-	annotationOnboardState = "metal.cloud.sap/onboarding-state"
+	annotationBootstrap           = "onboarding.metal.ironcore.dev/bootstrap"
+	annotationManagerType         = "onboarding.metal.ironcore.dev/manager-type"
+	annotationInventoryGeneration = "onboarding.metal.ironcore.dev/inventory-generation"
+	annotationOnboardState        = "metal.cloud.sap/onboarding-state"
 
 	labelManagedBy      = "onboarding.metal.ironcore.dev/managed-by"
 	labelManagedByValue = "metal-onboarding-operator"
@@ -218,7 +220,8 @@ func (r *DHCPLeaseController) reconcileBMC(ctx context.Context, log logr.Logger,
 				Name:   rec.ServerName,
 				Labels: labels,
 				Annotations: map[string]string{
-					annotationBootstrap: "true",
+					annotationBootstrap:           "true",
+					annotationInventoryGeneration: strconv.FormatInt(rec.InventoryGeneration, 10),
 				},
 			},
 			Spec: metalv1alpha1.BMCSpec{
@@ -250,6 +253,7 @@ func (r *DHCPLeaseController) reconcileBMC(ctx context.Context, log logr.Logger,
 			bmc.Annotations = map[string]string{}
 		}
 		bmc.Annotations[annotationBootstrap] = "true"
+		bmc.Annotations[annotationInventoryGeneration] = strconv.FormatInt(rec.InventoryGeneration, 10)
 		if managerType != "" {
 			bmc.Annotations[annotationManagerType] = managerType
 		}
