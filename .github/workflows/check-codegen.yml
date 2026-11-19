@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+name: Check Codegen
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+
+jobs:
+  check-codegen:
+    name: Check generated code and manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Run code and manifest generation
+        run: make generate manifests fmt
+      - name: Fail on uncommitted changes
+        run: |
+          if [ "$(git diff | wc -l)" -gt "0" ]; then
+            echo "Detected uncommitted changes after generation. Run 'make generate manifests fmt' locally."
+            git diff
+            exit 1
+          fi
