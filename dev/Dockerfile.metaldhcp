@@ -1,7 +1,7 @@
 # Tilt dev build for metaldhcp — skips the iPXE stub (no TFTP sidecar in dev).
 # Use the production Dockerfile for a full build with TFTP support.
 
-FROM --platform=$BUILDPLATFORM golang:1.26.3 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4 AS builder
 
 ARG GOARCH=''
 WORKDIR /workspace
