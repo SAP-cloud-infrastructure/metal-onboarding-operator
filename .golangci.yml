@@ -30,6 +30,7 @@ linters:
     modernize:
       disable:
         - omitzero
+        - embedlit
   exclusions:
     generated: lax
     rules:
