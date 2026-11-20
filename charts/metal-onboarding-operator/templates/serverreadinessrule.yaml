@@ -2,7 +2,7 @@
 apiVersion: metal.ironcore.dev/v1alpha1
 kind: ServerReadinessRule
 metadata:
-  name: metal-onboarding-operator
+  name: moo-discovery
   labels:
     {{- include "metal-onboarding-operator.labels" . | nindent 4 }}
 spec:
