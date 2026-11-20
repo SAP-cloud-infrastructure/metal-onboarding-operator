@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	github.com/SAP-cloud-infrastructure/metaldhcp v0.0.0-20261119121602-65f593071972
 	github.com/go-logr/logr v1.4.4
-	github.com/ironcore-dev/metal-maintenance-operator v0.1.1-0.20261119074956-d72b8eb31373
+	github.com/ironcore-dev/metal-maintenance-operator v0.1.1-0.20261120143055-a922f62ed48f
 	github.com/ironcore-dev/metal-operator v0.8.1-0.20261118074636-7f387b6ad836
 	github.com/onsi/ginkgo/v2 v2.34.0
 	github.com/onsi/gomega v1.44.0
