@@ -23,7 +23,7 @@ import (
 // MetalClusterSpec defines the desired state of MetalCluster.
 // A MetalCluster holds the static server inventory for one cluster — the
 // authoritative source of MAC address, serial number, interface topology, and
-// label data used by the onboarding controller when a DHCPLease arrives.
+// label data used by the onboarding controller when a Lease arrives.
 type MetalClusterSpec struct {
 	// Servers is the list of bare-metal servers that belong to this cluster.
 	// +optional

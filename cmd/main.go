@@ -201,11 +201,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.DHCPLeaseController{
+	if err := (&controller.LeaseController{
 		Client:              mgr.GetClient(),
 		Scheme:              mgr.GetScheme(),
 		InventoryProvider:   metalclusterprovider.New(mgr.GetClient(), clusterName),
-		EventRecorder:       mgr.GetEventRecorderFor("dhcplease-controller"), //nolint:staticcheck
+		EventRecorder:       mgr.GetEventRecorderFor("lease-controller"), //nolint:staticcheck
 		ClusterName:         clusterName,
 		RedfishProbeTimeout: redfishProbeTimeout,
 		RedfishBaseURL:      redfishBaseURL,
@@ -220,7 +220,7 @@ func main() {
 			bmcUserSetCredentialSecretNamespace,
 		),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "DHCPLease")
+		setupLog.Error(err, "unable to create controller", "controller", "Lease")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

@@ -101,13 +101,13 @@ func fakeRedfishServerWithSerial(managerType, serviceTag string) *httptest.Serve
 
 const unreachableRedfish = "http://127.0.0.1:1"
 
-var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
+var _ = Describe("LeaseController unit tests (fake client)", func() {
 	const testIP = "10.0.0.1"
 
-	newLease := func(name, mac string) *dhcpshim.DHCPLease {
-		return &dhcpshim.DHCPLease{
+	newLease := func(name, mac string) *dhcpshim.Lease {
+		return &dhcpshim.Lease{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Spec:       dhcpshim.DHCPLeaseSpec{MACAddress: mac, IP: testIP},
+			Spec:       dhcpshim.LeaseSpec{MACAddress: mac, IP: testIP},
 		}
 	}
 
@@ -120,7 +120,7 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 		lease := newLease("lease-2", "aa:bb:cc:dd:ee:ff")
 		s := newFakeScheme()
 		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
-		r := &DHCPLeaseController{Client: cl, Scheme: s, InventoryProvider: inv}
+		r := &LeaseController{Client: cl, Scheme: s, InventoryProvider: inv}
 
 		_, err := r.Reconcile(context.Background(), ctrl.Request{
 			NamespacedName: types.NamespacedName{Name: "lease-2"},
@@ -138,7 +138,7 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 		lease := newLease("lease-3", "aa:bb:cc:dd:ee:ff")
 		s := newFakeScheme()
 		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
-		r := &DHCPLeaseController{Client: cl, Scheme: s, InventoryProvider: inv}
+		r := &LeaseController{Client: cl, Scheme: s, InventoryProvider: inv}
 
 		result, err := r.Reconcile(context.Background(), ctrl.Request{
 			NamespacedName: types.NamespacedName{Name: "lease-3"},
@@ -158,7 +158,7 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 		lease := newLease("lease-4", "aa:bb:cc:dd:ee:ff")
 		s := newFakeScheme()
 		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
-		r := &DHCPLeaseController{
+		r := &LeaseController{
 			Client:            cl,
 			Scheme:            s,
 			InventoryProvider: inv,
@@ -171,12 +171,12 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("skips a DHCPLease with no MACAddress", func() {
+	It("skips a Lease with no MACAddress", func() {
 		inv := &fakeInventory{}
 		lease := newLease("lease-empty", "")
 		s := newFakeScheme()
 		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
-		r := &DHCPLeaseController{Client: cl, Scheme: s, InventoryProvider: inv}
+		r := &LeaseController{Client: cl, Scheme: s, InventoryProvider: inv}
 
 		_, err := r.Reconcile(context.Background(), ctrl.Request{
 			NamespacedName: types.NamespacedName{Name: "lease-empty"},
@@ -189,13 +189,13 @@ var _ = Describe("DHCPLeaseController unit tests (fake client)", func() {
 	})
 })
 
-var _ = Describe("DHCPLeaseController serial-first routing (fake client)", func() {
+var _ = Describe("LeaseController serial-first routing (fake client)", func() {
 	const testIP = "10.0.0.1"
 
-	newLeaseWithScheme := func(name, mac string) (*dhcpshim.DHCPLease, *runtime.Scheme) {
-		lease := &dhcpshim.DHCPLease{
+	newLeaseWithScheme := func(name, mac string) (*dhcpshim.Lease, *runtime.Scheme) {
+		lease := &dhcpshim.Lease{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Spec:       dhcpshim.DHCPLeaseSpec{MACAddress: mac, IP: testIP},
+			Spec:       dhcpshim.LeaseSpec{MACAddress: mac, IP: testIP},
 		}
 		s := newFakeScheme()
 		return lease, s
@@ -219,7 +219,7 @@ var _ = Describe("DHCPLeaseController serial-first routing (fake client)", func(
 		}
 		lease, s := newLeaseWithScheme("lease-serial", "aa:bb:cc:dd:ee:ff")
 		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
-		r := &DHCPLeaseController{
+		r := &LeaseController{
 			Client:              cl,
 			Scheme:              s,
 			InventoryProvider:   tracker,
@@ -241,7 +241,7 @@ var _ = Describe("DHCPLeaseController serial-first routing (fake client)", func(
 		}
 		lease, s := newLeaseWithScheme("lease-mac-fallback", "aa:bb:cc:dd:ee:ff")
 		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
-		r := &DHCPLeaseController{
+		r := &LeaseController{
 			Client:              cl,
 			Scheme:              s,
 			InventoryProvider:   tracker,
@@ -267,7 +267,7 @@ var _ = Describe("DHCPLeaseController serial-first routing (fake client)", func(
 		}
 		lease, s := newLeaseWithScheme("lease-serial-miss", "aa:bb:cc:dd:ee:ff")
 		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
-		r := &DHCPLeaseController{
+		r := &LeaseController{
 			Client:              cl,
 			Scheme:              s,
 			InventoryProvider:   tracker,
@@ -285,13 +285,13 @@ var _ = Describe("DHCPLeaseController serial-first routing (fake client)", func(
 	})
 })
 
-var _ = Describe("DHCPLeaseController annotation tests (fake client)", func() {
+var _ = Describe("LeaseController annotation tests (fake client)", func() {
 	const testIP = "10.0.0.1"
 
-	newLeaseWithScheme := func(name, mac string) (*dhcpshim.DHCPLease, *runtime.Scheme) {
-		lease := &dhcpshim.DHCPLease{
+	newLeaseWithScheme := func(name, mac string) (*dhcpshim.Lease, *runtime.Scheme) {
+		lease := &dhcpshim.Lease{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Spec:       dhcpshim.DHCPLeaseSpec{MACAddress: mac, IP: testIP},
+			Spec:       dhcpshim.LeaseSpec{MACAddress: mac, IP: testIP},
 		}
 		s := newFakeScheme()
 		return lease, s
@@ -301,7 +301,7 @@ var _ = Describe("DHCPLeaseController annotation tests (fake client)", func() {
 		inv := &fakeInventory{err: provider.ErrNotFound}
 		lease, s := newLeaseWithScheme("lease-ann-unreachable", "aa:bb:cc:dd:ee:ff")
 		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
-		r := &DHCPLeaseController{
+		r := &LeaseController{
 			Client:              cl,
 			Scheme:              s,
 			InventoryProvider:   inv,
@@ -315,7 +315,7 @@ var _ = Describe("DHCPLeaseController annotation tests (fake client)", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 
-		updated := &dhcpshim.DHCPLease{}
+		updated := &dhcpshim.Lease{}
 		Expect(cl.Get(context.Background(), types.NamespacedName{Name: "lease-ann-unreachable"}, updated)).To(Succeed())
 		Expect(updated.Annotations).To(HaveKeyWithValue(annotationOnboardState, onboardStateBMCUnreachable))
 	})
@@ -330,7 +330,7 @@ var _ = Describe("DHCPLeaseController annotation tests (fake client)", func() {
 		}
 		lease, s := newLeaseWithScheme("lease-ann-serial", "aa:bb:cc:dd:ee:ff")
 		cl := fake.NewClientBuilder().WithScheme(s).WithObjects(lease).Build()
-		r := &DHCPLeaseController{
+		r := &LeaseController{
 			Client:              cl,
 			Scheme:              s,
 			InventoryProvider:   tracker,
@@ -344,12 +344,12 @@ var _ = Describe("DHCPLeaseController annotation tests (fake client)", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 
-		updated := &dhcpshim.DHCPLease{}
+		updated := &dhcpshim.Lease{}
 		Expect(cl.Get(context.Background(), types.NamespacedName{Name: "lease-ann-serial"}, updated)).To(Succeed())
 		Expect(updated.Annotations).To(HaveKeyWithValue(annotationOnboardState, onboardStateSerialNotFound))
 	})
 })
-var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
+var _ = Describe("LeaseController integration tests (envtest)", func() {
 	const (
 		testMAC        = "aa:bb:cc:dd:ee:ff"
 		testIP         = "10.0.0.1"
@@ -366,12 +366,12 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 		redfishServer.Close()
 	})
 
-	newLease := func(name string) *dhcpshim.DHCPLease {
-		return &dhcpshim.DHCPLease{
+	newLease := func(name string) *dhcpshim.Lease {
+		return &dhcpshim.Lease{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: fmt.Sprintf("%s-%d", name, time.Now().UnixNano()),
 			},
-			Spec: dhcpshim.DHCPLeaseSpec{MACAddress: testMAC, IP: testIP},
+			Spec: dhcpshim.LeaseSpec{MACAddress: testMAC, IP: testIP},
 		}
 	}
 
@@ -389,7 +389,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 		Expect(k8sClient.Create(ctx, lease)).To(Succeed())
 		DeferCleanup(func() { _ = k8sClient.Delete(ctx, lease) })
 
-		r := &DHCPLeaseController{
+		r := &LeaseController{
 			Client:            k8sClient,
 			Scheme:            k8sClient.Scheme(),
 			InventoryProvider: inv,
@@ -425,7 +425,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 		Expect(k8sClient.Create(ctx, lease)).To(Succeed())
 		DeferCleanup(func() { _ = k8sClient.Delete(ctx, lease) })
 
-		r := &DHCPLeaseController{
+		r := &LeaseController{
 			Client:            k8sClient,
 			Scheme:            k8sClient.Scheme(),
 			InventoryProvider: inv,
@@ -450,7 +450,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 		Expect(found).To(Equal(1))
 	})
 
-	It("patches complete annotation on the DHCPLease after successful BMC creation", func() {
+	It("patches complete annotation on the Lease after successful BMC creation", func() {
 		uniqueServer := fmt.Sprintf("server-complete-%d", time.Now().UnixNano())
 		inv := &fakeInventory{record: &provider.InventoryRecord{
 			ClusterGate: provider.ClusterGateBelongs,
@@ -463,7 +463,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 		Expect(k8sClient.Create(ctx, lease)).To(Succeed())
 		DeferCleanup(func() { _ = k8sClient.Delete(ctx, lease) })
 
-		r := &DHCPLeaseController{
+		r := &LeaseController{
 			Client:            k8sClient,
 			Scheme:            k8sClient.Scheme(),
 			InventoryProvider: inv,
@@ -483,7 +483,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 			}
 		}
 
-		updated := &dhcpshim.DHCPLease{}
+		updated := &dhcpshim.Lease{}
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), updated)).To(Succeed())
 		Expect(updated.Annotations).To(HaveKeyWithValue(annotationOnboardState, onboardStateComplete))
 	})
@@ -502,7 +502,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 		Expect(k8sClient.Create(ctx, lease)).To(Succeed())
 		DeferCleanup(func() { _ = k8sClient.Delete(ctx, lease) })
 
-		r := &DHCPLeaseController{
+		r := &LeaseController{
 			Client:            k8sClient,
 			Scheme:            k8sClient.Scheme(),
 			InventoryProvider: inv,
@@ -545,7 +545,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 			_ = k8sClient.Delete(ctx, lease2)
 		})
 
-		r := &DHCPLeaseController{
+		r := &LeaseController{
 			Client:      k8sClient,
 			Scheme:      k8sClient.Scheme(),
 			ClusterName: clusterName,
@@ -574,7 +574,7 @@ var _ = Describe("DHCPLeaseController integration tests (envtest)", func() {
 			_ = k8sClient.Delete(ctx, lease2)
 		})
 
-		r := &DHCPLeaseController{
+		r := &LeaseController{
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 			// ClusterName intentionally empty

@@ -10,7 +10,7 @@ image:
 replicaCount: 1
 leaderElect: false
 
-# Watch DHCPLease CRs in the default namespace for local testing.
+# Watch Lease CRs in the default namespace for local testing.
 dhcpLeaseNamespace: default
 
 # Name of the MetalCluster CR used for local dev inventory.
