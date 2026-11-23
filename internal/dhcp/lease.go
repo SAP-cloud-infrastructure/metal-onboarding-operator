@@ -26,9 +26,9 @@ import (
 // package without depending directly on metaldhcp's module path.
 
 type (
-	DHCPLease     = metaldhcpv1alpha1.DHCPLease
-	DHCPLeaseList = metaldhcpv1alpha1.DHCPLeaseList
-	DHCPLeaseSpec = metaldhcpv1alpha1.DHCPLeaseSpec
+	Lease     = metaldhcpv1alpha1.Lease
+	LeaseList = metaldhcpv1alpha1.LeaseList
+	LeaseSpec = metaldhcpv1alpha1.LeaseSpec
 )
 
 var AddToScheme = metaldhcpv1alpha1.AddToScheme

@@ -4,22 +4,19 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.21.0
-  name: dhcpleases.dhcp.metal.ironcore.dev
+  name: leases.dhcp.metal.ironcore.dev
 spec:
   group: dhcp.metal.ironcore.dev
   names:
-    kind: DHCPLease
-    listKind: DHCPLeaseList
-    plural: dhcpleases
-    singular: dhcplease
+    kind: Lease
+    listKind: LeaseList
+    plural: leases
+    singular: lease
   scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.macAddress
       name: MAC
-      type: string
-    - jsonPath: .spec.hostname
-      name: Hostname
       type: string
     - jsonPath: .spec.clientID
       name: ClientID
@@ -28,8 +25,18 @@ spec:
     - jsonPath: .spec.ip
       name: IP
       type: string
+    - jsonPath: .spec.subnet
+      name: Subnet
+      type: string
+    - jsonPath: .spec.hostname
+      name: Hostname
+      type: string
     - jsonPath: .spec.gateway
       name: Gateway
+      priority: 1
+      type: string
+    - jsonPath: .spec.leaseExpiresAt
+      name: Expires
       type: string
     - jsonPath: .metadata.annotations['dhcp\.metal\.ironcore\.dev/vendor']
       name: Vendor
@@ -39,7 +46,7 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          DHCPLease records an IPv4 lease issued by metaldhcp. It is the durable allocation
+          Lease records an IPv4 lease issued by metaldhcp. It is the durable allocation
           ledger (the oob plugin rebuilds its in-memory allocator from these on startup) and
           the event that triggers the onboarding flow in the onboarding operator. metaldhcp
           owns these objects; the object name is the normalized MAC (e.g. "3cecefaabbcc") so
@@ -78,11 +85,21 @@ spec:
                 type: string
               ip:
                 type: string
+              leaseExpiresAt:
+                description: |-
+                  LeaseExpiresAt is the absolute time at which this lease expires (now + leaseTime at
+                  the moment the offer was sent). Updated on every re-lease.
+                format: date-time
+                type: string
               leaseTime:
                 description: LeaseTime is the lease duration offered for this address.
                   Updated on re-lease.
                 type: string
               macAddress:
+                type: string
+              subnet:
+                description: Subnet is the pool subnet CIDR for the assigned address
+                  (e.g. "10.219.0.96/27").
                 type: string
             required:
             - ip

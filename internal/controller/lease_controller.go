@@ -64,10 +64,10 @@ const (
 	redfishProbeTimeout = 10 * time.Second
 )
 
-// DHCPLeaseController watches DHCPLease CRs and drives the full onboarding workflow:
+// LeaseController watches Lease CRs and drives the full onboarding workflow:
 // Redfish probe → serial lookup → MAC lookup → BMC CR creation → BMCUserSet creation.
 // The BMC CR with bootstrap=true annotation is the handoff signal to metal-maintenance-operator.
-type DHCPLeaseController struct {
+type LeaseController struct {
 	client.Client
 	Scheme            *runtime.Scheme
 	InventoryProvider provider.InventoryProvider
@@ -97,31 +97,31 @@ type BMCUserSetConfig struct {
 	CredentialSecretNamespace string
 }
 
-// +kubebuilder:rbac:groups=dhcp.metal.ironcore.dev,resources=dhcpleases,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups=dhcp.metal.ironcore.dev,resources=leases,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=onboarding.metal.ironcore.dev,resources=metalclusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusersets,verbs=get;list;watch;create
 
-// Reconcile drives the full onboarding workflow for a single DHCPLease in one pass.
+// Reconcile drives the full onboarding workflow for a single Lease in one pass.
 // The reconciler is fully idempotent: if a BMC CR already exists for the server, the
 // CreateOrUpdate call is a no-op (spec is only written on creation).
-func (r *DHCPLeaseController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *LeaseController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	lease := &dhcpshim.DHCPLease{}
+	lease := &dhcpshim.Lease{}
 	if err := r.Get(ctx, req.NamespacedName, lease); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	mac := lease.Spec.MACAddress
 	if mac == "" {
-		log.Info("DHCPLease has no MACAddress, skipping", "lease", req.NamespacedName)
+		log.Info("Lease has no MACAddress, skipping", "lease", req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 
 	ip := lease.Spec.IP
 	if ip == "" {
-		log.Info("DHCPLease has no IP, skipping", "lease", req.NamespacedName)
+		log.Info("Lease has no IP, skipping", "lease", req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 
@@ -181,7 +181,7 @@ func (r *DHCPLeaseController) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 // reconcileBMC creates or updates the BMC CR and patches the lease annotation to "complete".
-func (r *DHCPLeaseController) reconcileBMC(ctx context.Context, log logr.Logger, lease *dhcpshim.DHCPLease, rec *provider.InventoryRecord, managerType string) (ctrl.Result, error) {
+func (r *LeaseController) reconcileBMC(ctx context.Context, log logr.Logger, lease *dhcpshim.Lease, rec *provider.InventoryRecord, managerType string) (ctrl.Result, error) {
 	_ = log // used via logf.FromContext elsewhere; keep for future structured logging
 
 	// When the inventory source (e.g. MetalCluster) does not carry the OOB IP,
@@ -274,7 +274,7 @@ func (r *DHCPLeaseController) reconcileBMC(ctx context.Context, log logr.Logger,
 
 // reconcileBMCUserSet creates a BMCUserSet for the given BMC name if one does not exist.
 // It is a no-op when BMCUserSet config is not set on the controller.
-func (r *DHCPLeaseController) reconcileBMCUserSet(ctx context.Context, bmcName string) error {
+func (r *LeaseController) reconcileBMCUserSet(ctx context.Context, bmcName string) error {
 	if r.BMCUserSet == nil {
 		return nil
 	}
@@ -326,8 +326,8 @@ func (r *DHCPLeaseController) reconcileBMCUserSet(ctx context.Context, bmcName s
 	return nil
 }
 
-// patchLeaseAnnotation sets metal.cloud.sap/onboarding-state on the DHCPLease.
-func (r *DHCPLeaseController) patchLeaseAnnotation(ctx context.Context, log logr.Logger, lease *dhcpshim.DHCPLease, state string) {
+// patchLeaseAnnotation sets metal.cloud.sap/onboarding-state on the Lease.
+func (r *LeaseController) patchLeaseAnnotation(ctx context.Context, log logr.Logger, lease *dhcpshim.Lease, state string) {
 	_ = log
 	base := lease.DeepCopy()
 	if lease.Annotations == nil {
@@ -340,7 +340,7 @@ func (r *DHCPLeaseController) patchLeaseAnnotation(ctx context.Context, log logr
 }
 
 // probeTimeout returns the configured probe timeout, falling back to redfishProbeTimeout.
-func (r *DHCPLeaseController) probeTimeout() time.Duration {
+func (r *LeaseController) probeTimeout() time.Duration {
 	if r.RedfishProbeTimeout > 0 {
 		return r.RedfishProbeTimeout
 	}
@@ -348,7 +348,7 @@ func (r *DHCPLeaseController) probeTimeout() time.Duration {
 }
 
 // redfishURL returns the Redfish base URL for the given IP.
-func (r *DHCPLeaseController) redfishURL(ip string) string {
+func (r *LeaseController) redfishURL(ip string) string {
 	if r.RedfishBaseURL != "" {
 		return r.RedfishBaseURL
 	}
@@ -414,30 +414,30 @@ func probeRedfish(ctx context.Context, baseURL string, timeout time.Duration) (r
 	}, nil
 }
 
-// SetupWithManager registers the DHCPLeaseController with the manager.
-func (r *DHCPLeaseController) SetupWithManager(mgr ctrl.Manager) error {
+// SetupWithManager registers the LeaseController with the manager.
+func (r *LeaseController) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&dhcpshim.DHCPLease{}).
+		For(&dhcpshim.Lease{}).
 		Watches(
 			&onboardingv1alpha1.MetalCluster{},
 			handler.EnqueueRequestsFromMapFunc(r.metalClusterToLeases),
 		).
-		Named("dhcplease").
+		Named("lease").
 		Complete(r)
 }
 
-// metalClusterToLeases maps a MetalCluster change event to all DHCPLeases so that
+// metalClusterToLeases maps a MetalCluster change event to all Leases so that
 // label changes in the MetalCluster are propagated to existing BMC CRs.
 // When ClusterName is set only changes to that CR trigger re-enqueuing; when empty
 // any MetalCluster change does (useful when the operator manages a single cluster
 // and --cluster-name is not configured).
-func (r *DHCPLeaseController) metalClusterToLeases(ctx context.Context, obj client.Object) []reconcile.Request {
+func (r *LeaseController) metalClusterToLeases(ctx context.Context, obj client.Object) []reconcile.Request {
 	if r.ClusterName != "" && obj.GetName() != r.ClusterName {
 		return nil
 	}
-	leaseList := &dhcpshim.DHCPLeaseList{}
+	leaseList := &dhcpshim.LeaseList{}
 	if err := r.List(ctx, leaseList); err != nil {
-		logf.FromContext(ctx).Error(err, "failed to list DHCPLeases for MetalCluster re-enqueue")
+		logf.FromContext(ctx).Error(err, "failed to list Leases for MetalCluster re-enqueue")
 		return nil
 	}
 	reqs := make([]reconcile.Request, len(leaseList.Items))

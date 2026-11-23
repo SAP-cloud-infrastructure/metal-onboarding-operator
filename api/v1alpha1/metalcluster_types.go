@@ -23,9 +23,33 @@ import (
 // MetalClusterSpec defines the desired state of MetalCluster.
 // A MetalCluster holds the static server inventory for one cluster — the
 // authoritative source of MAC address, serial number, interface topology, and
-// label data used by the onboarding controller when a DHCPLease arrives.
+// label data used by the onboarding controller when a Lease arrives.
 type MetalClusterSpec struct {
-	// Servers is the list of bare-metal servers that belong to this cluster.
+	// Labels are applied to every server in the cluster. Building-block and
+	// per-server labels are merged on top in that order, with later values
+	// overriding earlier ones.
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Groups groups servers by a shared label set (e.g. a building block, rack, or pod).
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Groups []Group `json:"groups,omitempty"`
+}
+
+// Group is a named set of servers that share a common label set.
+type Group struct {
+	// Name identifies the group (e.g. "bb097", "rack-42", "pod-a").
+	// +kubebuilder:validation:MinLength=1
+	// +required
+	Name string `json:"name"`
+
+	// Labels are merged on top of the cluster-level labels for every server in this group.
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Servers is the list of servers in this group.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
