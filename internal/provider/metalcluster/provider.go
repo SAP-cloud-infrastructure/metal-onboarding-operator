@@ -5,6 +5,7 @@ package metalcluster
 
 import (
 	"context"
+	"maps"
 	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,9 +38,11 @@ func (p *Provider) LookupBySerial(ctx context.Context, serial string) (*provider
 		return nil, err
 	}
 	serial = strings.ToUpper(serial)
-	for _, s := range mc.Spec.Servers {
-		if strings.ToUpper(s.Serial) == serial {
-			return recordFrom(s, mc.Generation), nil
+	for _, g := range mc.Spec.Groups {
+		for _, s := range g.Servers {
+			if strings.ToUpper(s.Serial) == serial {
+				return recordFrom(mc.Spec.Labels, g.Labels, s, mc.Generation), nil
+			}
 		}
 	}
 	return nil, provider.ErrNotFound
@@ -53,9 +56,11 @@ func (p *Provider) LookupByMAC(ctx context.Context, mac string) (*provider.Inven
 		return nil, err
 	}
 	mac = normMAC(mac)
-	for _, s := range mc.Spec.Servers {
-		if normMAC(s.RemoteboardMAC) == mac {
-			return recordFrom(s, mc.Generation), nil
+	for _, g := range mc.Spec.Groups {
+		for _, s := range g.Servers {
+			if normMAC(s.RemoteboardMAC) == mac {
+				return recordFrom(mc.Spec.Labels, g.Labels, s, mc.Generation), nil
+			}
 		}
 	}
 	return nil, provider.ErrNotFound
@@ -69,7 +74,13 @@ func (p *Provider) getMetalCluster(ctx context.Context) (*onboardingv1alpha1.Met
 	return mc, nil
 }
 
-func recordFrom(s onboardingv1alpha1.ServerEntry, generation int64) *provider.InventoryRecord {
+// recordFrom builds an InventoryRecord by merging labels global → bb → server.
+func recordFrom(globalLabels, bbLabels map[string]string, s onboardingv1alpha1.ServerEntry, generation int64) *provider.InventoryRecord {
+	labels := make(map[string]string, len(globalLabels)+len(bbLabels)+len(s.Labels))
+	maps.Copy(labels, globalLabels)
+	maps.Copy(labels, bbLabels)
+	maps.Copy(labels, s.Labels)
+
 	hostname := s.RemoteboardHostname
 	if hostname == "" {
 		hostname = s.Name
@@ -79,7 +90,7 @@ func recordFrom(s onboardingv1alpha1.ServerEntry, generation int64) *provider.In
 		ServerName:          s.Name,
 		OOBIP:               "",
 		BMCHostname:         hostname,
-		Labels:              s.Labels,
+		Labels:              labels,
 		InventoryGeneration: generation,
 	}
 }
