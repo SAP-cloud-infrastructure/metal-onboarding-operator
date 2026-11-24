@@ -80,6 +80,11 @@ type LeaseController struct {
 	RedfishBaseURL string
 	// RedfishProbeTimeout overrides the per-probe HTTP timeout (default 10s).
 	RedfishProbeTimeout time.Duration
+	// FactoryBMCUserRef is the name of a BMCUser CR whose BootstrapSecretRef holds
+	// factory credentials. When set, the controller uses these credentials to fetch
+	// SerialNumber from /redfish/v1/Systems/1 for vendors that don't expose it
+	// unauthenticated (e.g. HPE, Lenovo).
+	FactoryBMCUserRef string
 	// BMCUserSet holds the template config for BMCUserSet objects created per node.
 	// When nil, no BMCUserSet is created (e.g. in tests or when not configured).
 	BMCUserSet *BMCUserSetConfig
@@ -101,6 +106,8 @@ type BMCUserSetConfig struct {
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=onboarding.metal.ironcore.dev,resources=metalclusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusersets,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusers,verbs=get;list;watch
+// +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcsecrets,verbs=get;list;watch
 
 // Reconcile drives the full onboarding workflow for a single Lease in one pass.
 // The reconciler is fully idempotent: if a BMC CR already exists for the server, the
@@ -125,8 +132,16 @@ func (r *LeaseController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
-	// --- 1. Redfish probe (unauthenticated, short timeout) ---
-	redfishResult, redfishErr := probeRedfish(ctx, r.redfishURL(ip), r.probeTimeout())
+	// --- 1. Redfish probe — unauthenticated for Dell/Bull, authenticated fallback for HPE/Lenovo ---
+	var creds *bmcCredentials
+	if r.FactoryBMCUserRef != "" {
+		if c, err := r.fetchFactoryCredentials(ctx); err != nil {
+			log.Error(err, "failed to fetch factory BMC credentials, authenticated Redfish probe disabled")
+		} else {
+			creds = c
+		}
+	}
+	redfishResult, redfishErr := probeRedfish(ctx, r.redfishURL(ip), r.probeTimeout(), creds)
 	bmcUnreachable := redfishErr != nil
 	bmcReachable := !bmcUnreachable
 
@@ -361,56 +376,138 @@ type redfishResult struct {
 	ServiceTag  string
 }
 
-// probeRedfish performs an unauthenticated GET /redfish/v1 and extracts ManagerType and ServiceTag.
-// ServiceTag is read from Oem.Dell.ServiceTag; UUID is used as fallback.
-// Returns an empty redfishResult (not an error) when the endpoint is unreachable.
-func probeRedfish(ctx context.Context, baseURL string, timeout time.Duration) (redfishResult, error) {
-	url := baseURL + "/redfish/v1"
-	reqCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+// bmcCredentials holds a username/password pair for authenticated Redfish requests.
+type bmcCredentials struct {
+	Username string
+	Password string
+}
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
-	if err != nil {
-		return redfishResult{}, err
-	}
-
+// probeRedfish fetches serial number and manager type from a BMC's Redfish API.
+// Without creds: tries unauthenticated root for Dell (ServiceTag) and Bull (Oem.SerialNumber).
+// With creds: fetches real SerialNumber from /Systems/System.Embedded.1 (Dell) or /Systems/1 (others).
+func probeRedfish(ctx context.Context, baseURL string, timeout time.Duration, creds *bmcCredentials) (redfishResult, error) {
 	hc := &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // BMC certs are self-signed
 		},
 	}
-	resp, err := hc.Do(req)
+
+	doGet := func(url, username, password string) (*http.Response, error) {
+		reqCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		if username != "" {
+			req.SetBasicAuth(username, password)
+		}
+		return hc.Do(req)
+	}
+
+	getSerial := func(path string) string {
+		resp, err := doGet(baseURL+path, creds.Username, creds.Password)
+		if err != nil {
+			return ""
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			return ""
+		}
+		var body struct {
+			SerialNumber string `json:"SerialNumber"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			return ""
+		}
+		return body.SerialNumber
+	}
+
+	// discoverSerial fetches /redfish/v1/Systems, picks the first member, and returns its SerialNumber.
+	discoverSerial := func() string {
+		resp, err := doGet(baseURL+"/redfish/v1/Systems", creds.Username, creds.Password)
+		if err != nil {
+			return ""
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			return ""
+		}
+		var col struct {
+			Members []struct {
+				OdataID string `json:"@odata.id"`
+			} `json:"Members"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&col); err != nil || len(col.Members) == 0 {
+			return ""
+		}
+		return getSerial(col.Members[0].OdataID)
+	}
+
+	// Unauthenticated root probe to detect vendor and get serial for Bull.
+	resp, err := doGet(baseURL+"/redfish/v1", "", "")
 	if err != nil {
 		return redfishResult{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-
 	if resp.StatusCode != http.StatusOK {
 		return redfishResult{}, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	var body struct {
+	var root struct {
 		ManagerType string `json:"ManagerType"`
-		UUID        string `json:"UUID"`
 		Oem         struct {
 			Dell struct {
 				ServiceTag string `json:"ServiceTag"`
 			} `json:"Dell"`
+			SerialNumber string `json:"SerialNumber"` // Bull/Atos
 		} `json:"Oem"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&root); err != nil {
 		return redfishResult{}, err
 	}
 
-	serviceTag := body.Oem.Dell.ServiceTag
-	if serviceTag == "" {
-		serviceTag = body.UUID
+	var serial string
+	if creds != nil {
+		// Bull exposes serial unauthenticated at root — no need to probe further.
+		if root.Oem.SerialNumber != "" {
+			serial = root.Oem.SerialNumber
+		} else {
+			// Discover the first system member and fetch its SerialNumber.
+			serial = discoverSerial()
+		}
+	} else {
+		// Unauthenticated: Dell ServiceTag or Bull Oem.SerialNumber
+		serial = root.Oem.Dell.ServiceTag
+		if serial == "" {
+			serial = root.Oem.SerialNumber
+		}
 	}
 
 	return redfishResult{
-		ManagerType: body.ManagerType,
-		ServiceTag:  serviceTag,
+		ManagerType: root.ManagerType,
+		ServiceTag:  serial,
+	}, nil
+}
+
+// fetchFactoryCredentials retrieves the bootstrap credentials from the BMCUser CR
+// referenced by FactoryBMCUserRef, via its Status.BootstrapSecretRef → BMCSecret.
+func (r *LeaseController) fetchFactoryCredentials(ctx context.Context) (*bmcCredentials, error) {
+	bmcUser := &baseboardv1alpha1.BMCUser{}
+	if err := r.Get(ctx, types.NamespacedName{Name: r.FactoryBMCUserRef}, bmcUser); err != nil {
+		return nil, fmt.Errorf("get BMCUser %s: %w", r.FactoryBMCUserRef, err)
+	}
+	if bmcUser.Status.BootstrapSecretRef == nil {
+		return nil, nil
+	}
+	secret := &metalv1alpha1.BMCSecret{}
+	if err := r.Get(ctx, types.NamespacedName{Name: bmcUser.Status.BootstrapSecretRef.Name}, secret); err != nil {
+		return nil, fmt.Errorf("get BMCSecret %s: %w", bmcUser.Status.BootstrapSecretRef.Name, err)
+	}
+	return &bmcCredentials{
+		Username: string(secret.Data[metalv1alpha1.BMCSecretUsernameKeyName]),
+		Password: string(secret.Data[metalv1alpha1.BMCSecretPasswordKeyName]),
 	}, nil
 }
 

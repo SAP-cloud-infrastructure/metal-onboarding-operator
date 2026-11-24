@@ -75,6 +75,7 @@ func main() {
 	var clusterName string
 	var redfishProbeTimeout time.Duration
 	var redfishBaseURL string
+	var factoryBMCUserRef string
 	var tlsOpts []func(*tls.Config)
 
 	// BMCUserSet config — when setupCredentialRefName is empty, no BMCUserSet is created.
@@ -110,6 +111,8 @@ func main() {
 		"Timeout for the initial unauthenticated Redfish probe used for serial number discovery.")
 	flag.StringVar(&redfishBaseURL, "redfish-base-url", "",
 		"Override Redfish endpoint base URL (e.g. https://fake-redfish for local dev). When empty, uses https://<lease-IP>.")
+	flag.StringVar(&factoryBMCUserRef, "bmc-factory-user-ref", "",
+		"Name of a BMCUser CR whose Status.BootstrapSecretRef holds factory credentials for authenticated Redfish probes (HPE, Lenovo). When empty, only unauthenticated probes are attempted.")
 	flag.StringVar(&bmcUserSetSetupCredentialRefName, "bmc-userset-setup-credential-ref-name", "",
 		"Name of the Secret (in --bmc-userset-setup-credential-ref-namespace) holding the factory BMC credential "+
 			"used to bootstrap new BMCUserSets. When empty, no BMCUserSet is created.")
@@ -209,6 +212,7 @@ func main() {
 		ClusterName:         clusterName,
 		RedfishProbeTimeout: redfishProbeTimeout,
 		RedfishBaseURL:      redfishBaseURL,
+		FactoryBMCUserRef:   factoryBMCUserRef,
 		BMCUserSet: buildBMCUserSetConfig(
 			bmcUserSetSetupCredentialRefName,
 			bmcUserSetSetupCredentialRefNamespace,
