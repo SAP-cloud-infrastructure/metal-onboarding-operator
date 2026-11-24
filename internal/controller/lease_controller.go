@@ -458,8 +458,10 @@ func probeRedfish(ctx context.Context, baseURL string, timeout time.Duration, cr
 	var root struct {
 		ManagerType string `json:"ManagerType"`
 		Oem         struct {
-			Dell         struct{ ServiceTag string `json:"ServiceTag"` } `json:"Dell"`
-			SerialNumber string                                          `json:"SerialNumber"` // Bull/Atos
+			Dell struct {
+				ServiceTag string `json:"ServiceTag"`
+			} `json:"Dell"`
+			SerialNumber string `json:"SerialNumber"` // Bull/Atos
 		} `json:"Oem"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&root); err != nil {
@@ -491,7 +493,7 @@ func probeRedfish(ctx context.Context, baseURL string, timeout time.Duration, cr
 
 // fetchFactoryCredentials retrieves the bootstrap credentials from the BMCUser CR
 // referenced by FactoryBMCUserRef, via its Status.BootstrapSecretRef → BMCSecret.
-func (r *DHCPLeaseController) fetchFactoryCredentials(ctx context.Context) (*bmcCredentials, error) {
+func (r *LeaseController) fetchFactoryCredentials(ctx context.Context) (*bmcCredentials, error) {
 	bmcUser := &baseboardv1alpha1.BMCUser{}
 	if err := r.Get(ctx, types.NamespacedName{Name: r.FactoryBMCUserRef}, bmcUser); err != nil {
 		return nil, fmt.Errorf("get BMCUser %s: %w", r.FactoryBMCUserRef, err)

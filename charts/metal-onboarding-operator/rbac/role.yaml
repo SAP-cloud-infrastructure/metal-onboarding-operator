@@ -7,6 +7,15 @@ rules:
 - apiGroups:
   - baseboard.metal.ironcore.dev
   resources:
+  - bmcsecrets
+  - bmcusers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
   - bmcusersets
   verbs:
   - create
